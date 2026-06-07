@@ -22,17 +22,29 @@ final class ScriptRunner: ScriptRunnerProtocol, @unchecked Sendable {
     /// Enhanced PATH for script execution including common Homebrew and system directories
     private let enhancedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+    /// Extracts the executable path from a config string that may include embedded arguments.
+    /// e.g. "/path/to/script.sh --flag value" → "/path/to/script.sh"
+    private func extractScriptPath(from pathWithArgs: String) -> String? {
+        guard !pathWithArgs.isEmpty else { return nil }
+        return String(pathWithArgs.split(separator: " ", maxSplits: 1)[0])
+    }
+
+    /// Builds the shell command string, appending the message argument with safe single-quote escaping.
+    private func buildShellCommand(_ pathWithArgs: String, argument: String?) -> String {
+        guard let argument = argument else { return pathWithArgs }
+        let escaped = argument.replacingOccurrences(of: "'", with: "'\\''")
+        return "\(pathWithArgs) '\(escaped)'"
+    }
+
     /// Runs a shell script asynchronously with the message body as an argument
     /// Additional message context can be passed via environment variables
     func runScript(at path: String, withArgument argument: String? = nil, extraEnv: [String: String]? = nil) {
         DispatchQueue.global(qos: .utility).async { [enhancedPATH = self.enhancedPATH] in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = [path]
-
-            if let argument = argument {
-                process.arguments?.append(argument)
-            }
+            // Use -c so shell parses embedded arguments in path (e.g. "script.sh --flag value")
+            let shellCommand = self.buildShellCommand(path, argument: argument)
+            process.arguments = ["-c", shellCommand]
 
             // Set up environment with enhanced PATH
             var environment = ProcessInfo.processInfo.environment
@@ -96,17 +108,21 @@ final class ScriptRunner: ScriptRunnerProtocol, @unchecked Sendable {
 
     /// Validates that a script exists and is executable
     func validateScript(at path: String) -> Bool {
+        guard let scriptPath = extractScriptPath(from: path) else {
+            print("Script path is empty")
+            return false
+        }
         let fileManager = FileManager.default
         var isDirectory: ObjCBool = false
 
-        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory),
+        guard fileManager.fileExists(atPath: scriptPath, isDirectory: &isDirectory),
               !isDirectory.boolValue else {
-            print("Script not found or is a directory: \(path)")
+            print("Script not found or is a directory: \(scriptPath)")
             return false
         }
 
-        guard fileManager.isExecutableFile(atPath: path) else {
-            print("Script is not executable: \(path)")
+        guard fileManager.isExecutableFile(atPath: scriptPath) else {
+            print("Script is not executable: \(scriptPath)")
             return false
         }
 
@@ -219,18 +235,18 @@ final class ScriptRunner: ScriptRunnerProtocol, @unchecked Sendable {
         let fileManager = FileManager.default
         var isDirectory: ObjCBool = false
 
-        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory),
+        guard let scriptPath = extractScriptPath(from: path) else {
+            return (-1, "", "Failed to execute: Script path is empty")
+        }
+        guard fileManager.fileExists(atPath: scriptPath, isDirectory: &isDirectory),
               !isDirectory.boolValue else {
             return (-1, "", "Failed to execute: Script not found or is a directory")
         }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = [path]
-
-        if let argument = argument {
-            process.arguments?.append(argument)
-        }
+        let shellCommand = buildShellCommand(path, argument: argument)
+        process.arguments = ["-c", shellCommand]
 
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = enhancedPATH
