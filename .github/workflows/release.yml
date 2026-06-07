@@ -21,6 +21,14 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Update Info.plist version from tag
+        run: |
+          VERSION_CLEAN="${{ steps.version.outputs.VERSION }}"
+          VERSION_CLEAN="${VERSION_CLEAN#v}"
+          BUILD="${VERSION_CLEAN//./}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION_CLEAN}" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD}" Resources/Info.plist
+
       - name: Run tests
         run: swift test
       
