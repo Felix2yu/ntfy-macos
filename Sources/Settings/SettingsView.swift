@@ -48,15 +48,15 @@ struct SettingsView: View {
             Section {
                 localServerSection
             } header: {
-                Text("Local Server")
+                Text("本地服务器")
                     .foregroundStyle(.secondary)
             }
 
-            Section("Servers") {
+            Section("服务器") {
                 ForEach(viewModel.servers) { server in
                     HStack {
                         Label(
-                            server.url.isEmpty ? "New Server" : server.url
+                            server.url.isEmpty ? "新服务器" : server.url
                                 .replacingOccurrences(of: "https://", with: "")
                                 .replacingOccurrences(of: "http://", with: ""),
                             systemImage: "server.rack"
@@ -106,11 +106,11 @@ struct SettingsView: View {
     private func connectionTooltip(for state: StatusBarController.ConnectionState) -> String {
         switch state {
         case .connected:
-            return "Connected"
+            return "已连接"
         case .connecting:
-            return "Connecting..."
+            return "连接中…"
         case .disconnected:
-            return "Disconnected"
+            return "已断开"
         }
     }
 
@@ -121,19 +121,19 @@ struct SettingsView: View {
             // Port configuration
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Port")
+                    Text("端口")
                         .foregroundStyle(.secondary)
 
                     Spacer()
 
-                    TextField("e.g. 9292", text: $viewModel.localServerPort)
+                    TextField("如 9292", text: $viewModel.localServerPort)
                         .modifier(LockedTextFieldModifier(isLocked: viewModel.isLocked))
                         .frame(width: 100)
                         .multilineTextAlignment(.trailing)
                         .disabled(viewModel.isLocked)
                 }
 
-                Text("Port must be between 1024-65535")
+                Text("端口范围须为 1024–65535")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -143,7 +143,7 @@ struct SettingsView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Test it:")
+                    Text("试一试：")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -196,7 +196,7 @@ struct SettingsView: View {
                 HStack(spacing: 4) {
                     Image(systemName: copiedCommand == command ? "checkmark.circle.fill" : "doc.on.doc")
                         .font(.caption)
-                    Text(copiedCommand == command ? "Copied!" : "Copy")
+                    Text(copiedCommand == command ? "已拷贝" : "拷贝")
                         .font(.caption)
                         .fontWeight(.medium)
                 }
@@ -209,7 +209,7 @@ struct SettingsView: View {
                 )
             }
             .buttonStyle(.plain)
-            .help("Copy to clipboard")
+            .help("拷贝到剪贴板")
         }
         .padding(10)
         .background(
@@ -241,7 +241,7 @@ struct SettingsView: View {
                 Image(systemName: viewModel.isLocked ? "lock.fill" : "lock.open.fill")
             }
             .buttonStyle(.plain)
-            .help(viewModel.isLocked ? "Unlock to edit" : "Lock editing")
+            .help(viewModel.isLocked ? "点击解锁编辑" : "锁定编辑")
 
             Divider()
                 .frame(height: 16)
@@ -267,7 +267,7 @@ struct SettingsView: View {
                 Circle()
                     .fill(.orange)
                     .frame(width: 8, height: 8)
-                    .help("Unsaved changes")
+                    .help("有未保存的更改")
             }
 
             Button {
@@ -278,7 +278,7 @@ struct SettingsView: View {
             }
             .buttonStyle(.borderless)
             .disabled(viewModel.isLocked)
-            .help("Open config file in editor")
+            .help("在编辑器中打开配置文件")
         }
         .padding(8)
     }
@@ -298,9 +298,9 @@ struct SettingsView: View {
                 Image(systemName: "server.rack")
                     .font(.system(size: 48))
                     .foregroundStyle(.secondary)
-                Text("Select a server or add one")
+                Text("选择或添加一个服务器")
                     .foregroundStyle(.secondary)
-                Button("Add Server") {
+                Button("添加服务器") {
                     viewModel.isLocked = false
                     viewModel.addServer()
                 }

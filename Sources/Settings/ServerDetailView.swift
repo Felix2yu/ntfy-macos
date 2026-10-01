@@ -23,7 +23,7 @@ struct ServerDetailView: View {
 
     var body: some View {
         Form {
-            Section("Server") {
+            Section("服务器") {
                 HStack {
                     Text("URL")
                         .foregroundStyle(.secondary)
@@ -34,25 +34,25 @@ struct ServerDetailView: View {
 
                 HStack {
                     if server.token.isEmpty {
-                        Text("Token: not configured")
+                        Text("令牌：未配置")
                             .foregroundStyle(.secondary)
                     } else if server.storeInKeychain {
-                        Label("Token stored in Keychain", systemImage: "key.fill")
+                        Label("令牌存储于钥匙串", systemImage: "key.fill")
                             .foregroundStyle(.secondary)
                     } else {
-                        Label("Token stored in config file", systemImage: "doc.text")
+                        Label("令牌存储于配置文件", systemImage: "doc.text")
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
-                    Button("Manage...") {
+                    Button("管理…") {
                         showTokenSheet = true
                     }
                     .disabled(isLocked)
                 }
 
-                Toggle("Fetch missed messages on reconnect", isOn: $server.fetchMissed)
+                Toggle("重连时拉取错过的消息", isOn: $server.fetchMissed)
                     .foregroundStyle(.secondary)
                     .disabled(isLocked)
             }
@@ -68,16 +68,16 @@ struct ServerDetailView: View {
                     Button {
                         viewModel.addTopic(to: server.id)
                     } label: {
-                        Label("Add Topic", systemImage: "plus")
+                        Label("添加主题", systemImage: "plus")
                     }
                     .buttonStyle(.borderless)
                 }
             } header: {
                 HStack {
-                    Text("Topics")
+                    Text("主题")
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("Fetch")
+                    Text("拉取")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -107,12 +107,12 @@ struct ServerDetailView: View {
                 Spacer()
 
                 if !viewModel.isLocked {
-                    Button("Cancel") {
+                    Button("取消") {
                         viewModel.cancel()
                     }
                     .keyboardShortcut(.escape, modifiers: [])
 
-                    Button("Save") {
+                    Button("保存") {
                         viewModel.save()
                     }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -136,8 +136,8 @@ struct TokenSheetView: View {
     @State private var storageChoice: TokenStorage = .keychain
 
     enum TokenStorage: String, CaseIterable {
-        case keychain = "Keychain (recommended)"
-        case configFile = "Config file"
+        case keychain = "钥匙串（推荐）"
+        case configFile = "配置文件"
     }
 
     var body: some View {
@@ -147,7 +147,7 @@ struct TokenSheetView: View {
                     if !server.token.isEmpty {
                         HStack {
                             Label(
-                                server.storeInKeychain ? "Currently in Keychain" : "Currently in config file",
+                                server.storeInKeychain ? "当前存于钥匙串" : "当前存于配置文件",
                                 systemImage: server.storeInKeychain ? "key.fill" : "doc.text"
                             )
                             Spacer()
@@ -160,23 +160,23 @@ struct TokenSheetView: View {
                                     .foregroundStyle(.red)
                             }
                             .buttonStyle(.borderless)
-                            .help("Remove token")
+                            .help("删除令牌")
                         }
                     }
                 } header: {
-                    Text("Current Status")
+                    Text("当前状态")
                 }
 
                 Section {
-                    SecureField("Enter token", text: $tokenText)
+                    SecureField("输入令牌", text: $tokenText)
 
-                    Picker("Store in", selection: $storageChoice) {
+                    Picker("存储位置", selection: $storageChoice) {
                         ForEach(TokenStorage.allCases, id: \.self) { storage in
                             Text(storage.rawValue).tag(storage)
                         }
                     }
                 } header: {
-                    Text(server.token.isEmpty ? "Add Token" : "Replace Token")
+                    Text(server.token.isEmpty ? "添加令牌" : "替换令牌")
                 }
             }
             .formStyle(.grouped)
@@ -184,12 +184,12 @@ struct TokenSheetView: View {
             Divider()
             HStack {
                 Spacer()
-                Button("Cancel") {
+                Button("取消") {
                     dismiss()
                 }
                 .keyboardShortcut(.escape, modifiers: [])
 
-                Button("Save Token") {
+                Button("保存令牌") {
                     server.token = tokenText
                     server.storeInKeychain = (storageChoice == .keychain)
                     dismiss()

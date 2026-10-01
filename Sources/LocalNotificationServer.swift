@@ -204,7 +204,8 @@ final class LocalNotificationServer: @unchecked Sendable {
             click: nil,
             actions: nil,
             attachment: nil,
-            contentType: nil
+            contentType: nil,
+            sequenceId: nil
         )
 
         onNotification?(localMessage)

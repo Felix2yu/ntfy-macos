@@ -191,15 +191,15 @@ enum ConfigError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .fileNotFound:
-            return "Configuration file not found"
+            return "未找到配置文件"
         case .invalidYAML(let error):
-            return "Invalid YAML: \(error.localizedDescription)"
+            return "YAML 无效：\(error.localizedDescription)"
         case .decodingError(let error):
-            return "Configuration error: \(error.localizedDescription)"
+            return "配置错误：\(error.localizedDescription)"
         case .insecureFilePermissions(let message):
             return message
         case .unknownKeys(let details):
-            return "Unknown configuration keys:\n\(details)"
+            return "未知配置项：\n\(details)"
         }
     }
 }
@@ -218,7 +218,7 @@ struct ConfigValidator {
                 throw ConfigError.decodingError(NSError(
                     domain: "ConfigValidator",
                     code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Server \(server.url) has no topics configured"]
+                    userInfo: [NSLocalizedDescriptionKey: "服务器 \(server.url) 未配置任何主题"]
                 ))
             }
             
@@ -228,7 +228,7 @@ struct ConfigValidator {
                 throw ConfigError.decodingError(NSError(
                     domain: "ConfigValidator",
                     code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: "Duplicate topic names in server \(server.url)"]
+                    userInfo: [NSLocalizedDescriptionKey: "服务器 \(server.url) 中存在重复的主题名称"]
                 ))
             }
         }
@@ -240,7 +240,7 @@ struct ConfigValidator {
             throw ConfigError.decodingError(NSError(
                 domain: "ConfigValidator",
                 code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid URL format: \(urlString)"]
+                userInfo: [NSLocalizedDescriptionKey: "URL 格式无效：\(urlString)"]
             ))
         }
         
@@ -249,7 +249,7 @@ struct ConfigValidator {
             throw ConfigError.decodingError(NSError(
                 domain: "ConfigValidator",
                 code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "URL must use http or https scheme: \(urlString)"]
+                userInfo: [NSLocalizedDescriptionKey: "URL 必须使用 http 或 https 协议：\(urlString)"]
             ))
         }
         
@@ -257,7 +257,7 @@ struct ConfigValidator {
             throw ConfigError.decodingError(NSError(
                 domain: "ConfigValidator",
                 code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "URL must have a valid host: \(urlString)"]
+                userInfo: [NSLocalizedDescriptionKey: "URL 必须包含有效主机名：\(urlString)"]
             ))
         }
     }
@@ -342,7 +342,7 @@ final class ConfigManager: @unchecked Sendable {
         // Check root level
         for key in yaml.keys {
             if !Self.knownRootKeys.contains(key) {
-                warnings.append("Unknown key '\(key)' at root level")
+                warnings.append("根级别存在未知配置项 '\(key)'")
             }
         }
 
@@ -352,7 +352,7 @@ final class ConfigManager: @unchecked Sendable {
                 let serverUrl = server["url"] as? String ?? "server[\(serverIndex)]"
                 for key in server.keys {
                     if !Self.knownServerKeys.contains(key) {
-                        warnings.append("Unknown key '\(key)' in server '\(serverUrl)'")
+                        warnings.append("服务器 '\(serverUrl)' 中存在未知配置项 '\(key)'")
                     }
                 }
 
@@ -362,7 +362,7 @@ final class ConfigManager: @unchecked Sendable {
                         let topicName = topic["name"] as? String ?? "topic[\(topicIndex)]"
                         for key in topic.keys {
                             if !Self.knownTopicKeys.contains(key) {
-                                warnings.append("Unknown key '\(key)' in topic '\(topicName)' (server: \(serverUrl))")
+                                warnings.append("主题 '\(topicName)'（服务器：\(serverUrl)）中存在未知配置项 '\(key)'")
                             }
                         }
 
@@ -372,7 +372,7 @@ final class ConfigManager: @unchecked Sendable {
                                 let actionTitle = action["title"] as? String ?? "action[\(actionIndex)]"
                                 for key in action.keys {
                                     if !Self.knownActionKeys.contains(key) {
-                                        warnings.append("Unknown key '\(key)' in action '\(actionTitle)' (topic: \(topicName))")
+                                        warnings.append("动作 '\(actionTitle)'（主题：\(topicName)）中存在未知配置项 '\(key)'")
                                     }
                                 }
                             }
@@ -404,17 +404,23 @@ final class ConfigManager: @unchecked Sendable {
 
         if worldWritable {
             throw ConfigError.insecureFilePermissions(
-                "Config file at \(path) is world-writable (permissions: \(String(posixPermissions, radix: 8))). " +
-                "Please run: chmod o-w \"\(path)\""
+                "配置文件 \(path) 权限过于开放（任意用户可写，权限：\(String(posixPermissions, radix: 8))）。" +
+                "请执行：chmod o-w \"\(path)\""
             )
         }
     }
 
-    /// Creates a sample configuration file at the specified path
-    static func createSampleConfig(at path: String? = nil) throws {
+    /// Creates a sample configuration file at the specified path.
+    /// Returns false when a file is already there — an existing config is never overwritten.
+    @discardableResult
+    static func createSampleConfig(at path: String? = nil) throws -> Bool {
         let configPath = path ?? defaultConfigPath
         let url = URL(fileURLWithPath: configPath)
         let directory = url.deletingLastPathComponent()
+
+        if FileManager.default.fileExists(atPath: configPath) {
+            return false
+        }
 
         try FileManager.default.createDirectory(
             at: directory,
@@ -423,21 +429,21 @@ final class ConfigManager: @unchecked Sendable {
         )
 
         let sampleYAML = """
-        # ntfy-macos configuration file
-        # local_server_port: 9292  # optional: enable local HTTP server for script-triggered notifications
+        # ntfy-macos 配置文件
+        # local_server_port: 9292  # 可选：启用本地 HTTP 服务器，供脚本触发通知
         servers:
           - url: https://ntfy.sh
-            # token: your_token_here  # optional, or use 'ntfy-macos auth add'
-            # allowed_schemes:  # optional, defaults to [http, https]
+            # token: your_token_here  # 可选，或使用 'ntfy-macos auth add' 存入钥匙串
+            # allowed_schemes:  # 可选，默认为 [http, https]
             #   - https
             #   - myapp
-            # allowed_domains:  # optional, restrict URLs to specific domains
+            # allowed_domains:  # 可选，限制可打开链接的域名
             #   - example.com
             #   - "*.trusted.org"
             topics:
               - name: alerts
                 icon_symbol: bell.fill
-                # click_url: false  # disable opening browser on click
+                # click_url: false  # 禁止点击通知时打开浏览器
                 actions:
                   - title: Acknowledge
                     type: script
@@ -445,7 +451,7 @@ final class ConfigManager: @unchecked Sendable {
 
               - name: releases
                 icon_symbol: arrow.down.circle.fill
-                click_url: https://github.com/org/repo/releases  # custom URL on click
+                click_url: https://github.com/org/repo/releases  # 点击时打开的自定义链接
 
           - url: https://your-private-server.com
             token: your_private_token
@@ -460,6 +466,7 @@ final class ConfigManager: @unchecked Sendable {
         """
 
         try sampleYAML.write(to: url, atomically: true, encoding: .utf8)
+        return true
     }
 
     /// Retrieves the authentication token for a specific server

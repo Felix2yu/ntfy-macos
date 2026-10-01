@@ -13,19 +13,19 @@ struct TopicRowView: View {
                         .foregroundStyle(.red)
                 }
                 .buttonStyle(.borderless)
-                .help("Remove topic")
+                .help("删除主题")
             }
 
             Image(systemName: "number")
                 .foregroundStyle(.secondary)
                 .font(.caption)
-            TextField("", text: $topic.name, prompt: Text("topic"))
+            TextField("", text: $topic.name, prompt: Text("主题"))
                 .modifier(LockedTextFieldModifier(isLocked: isLocked))
                 .disabled(isLocked)
 
             Spacer()
 
-            Toggle("Fetch", isOn: Binding(
+            Toggle("拉取", isOn: Binding(
                 get: { topic.fetchMissed ?? false },
                 set: { topic.fetchMissed = $0 ? true : nil }
             ))

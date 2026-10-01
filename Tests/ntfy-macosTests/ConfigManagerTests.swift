@@ -127,7 +127,7 @@ final class ConfigManagerTests: XCTestCase {
             try? FileManager.default.removeItem(atPath: samplePath)
         }
 
-        try ConfigManager.createSampleConfig(at: samplePath)
+        XCTAssertTrue(try ConfigManager.createSampleConfig(at: samplePath))
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: samplePath))
 
@@ -135,6 +135,23 @@ final class ConfigManagerTests: XCTestCase {
         XCTAssertTrue(content.contains("servers:"))
         XCTAssertTrue(content.contains("topics:"))
         XCTAssertTrue(content.contains("ntfy.sh"))
+    }
+
+    /// A user's existing config must survive a second `init` / sample-creation attempt.
+    func testCreateSampleConfigNeverOverwritesExistingFile() throws {
+        let existingPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("existing-config-\(UUID().uuidString).yml").path
+        let userConfig = "servers:\n  - url: https://mine.example\n    topics:\n      - name: private\n"
+        try userConfig.write(toFile: existingPath, atomically: true, encoding: .utf8)
+
+        defer {
+            try? FileManager.default.removeItem(atPath: existingPath)
+        }
+
+        XCTAssertFalse(try ConfigManager.createSampleConfig(at: existingPath))
+
+        let content = try String(contentsOfFile: existingPath, encoding: .utf8)
+        XCTAssertEqual(content, userConfig)
     }
 
     func testCreateSampleConfigCreatesDirectory() throws {

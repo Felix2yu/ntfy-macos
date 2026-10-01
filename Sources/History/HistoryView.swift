@@ -1,0 +1,81 @@
+import SwiftUI
+
+/// Root view of the notification history window:
+/// sidebar with topics (grouped by server, unread badges) + message list.
+struct HistoryView: View {
+    @ObservedObject var viewModel: HistoryViewModel
+
+    var body: some View {
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+        } detail: {
+            if let ref = viewModel.selectedTopic {
+                TopicDetailView(viewModel: viewModel, topicRef: ref)
+                    .id(ref)  // reset scroll state when switching topics
+            } else {
+                Text("选择一个主题查看历史消息")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(minWidth: 860, minHeight: 560)
+        .onAppear {
+            viewModel.refreshSidebar()
+        }
+    }
+
+    // MARK: - Sidebar
+
+    private var sidebar: some View {
+        List(selection: Binding<TopicRef?>(
+            get: { viewModel.selectedTopic },
+            set: { viewModel.selectTopic($0) }
+        )) {
+            if viewModel.groups.isEmpty {
+                Text("未配置服务器或主题")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(viewModel.groups) { group in
+                Section(group.url) {
+                    ForEach(group.topics) { entry in
+                        topicRow(entry)
+                            .tag(entry.ref)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                if viewModel.totalUnread > 0 {
+                    Text("\(viewModel.totalUnread) 条未读")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+    }
+
+    private func topicRow(_ entry: HistoryViewModel.TopicEntry) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: entry.iconSymbol ?? "bell")
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(entry.ref.topic)
+                .lineLimit(1)
+            Spacer()
+            if entry.unread > 0 {
+                Text("\(entry.unread)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.accentColor))
+            }
+        }
+    }
+}

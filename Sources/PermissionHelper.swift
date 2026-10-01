@@ -36,14 +36,14 @@ class PermissionHelper {
         )
         self.window = window
 
-        window.title = "ntfy-macos - Notification Setup"
+        window.title = "ntfy-macos - 通知权限设置"
         window.center()
 
         let contentView = NSView(frame: window.contentView!.bounds)
         contentView.wantsLayer = true
         contentView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
-        let label = NSTextField(wrappingLabelWithString: "Checking notification permissions...")
+        let label = NSTextField(wrappingLabelWithString: "正在检查通知权限…")
         label.frame = NSRect(x: 30, y: 120, width: 440, height: 80)
         label.alignment = .center
         label.font = NSFont.systemFont(ofSize: 14)
@@ -51,7 +51,7 @@ class PermissionHelper {
         contentView.addSubview(label)
 
         let button = NSButton(frame: NSRect(x: 175, y: 40, width: 150, height: 40))
-        button.title = "Request Permission"
+        button.title = "请求权限"
         button.bezelStyle = .rounded
         button.target = PermissionHelperTarget.shared
         button.action = #selector(PermissionHelperTarget.requestPermissionClicked)
@@ -74,7 +74,7 @@ class PermissionHelper {
             DispatchQueue.main.async {
                 switch status {
                 case .notDetermined:
-                    self.label?.stringValue = "ntfy-macos needs permission to send notifications.\n\nClick the button below to request permission."
+                    self.label?.stringValue = "ntfy-macos 需要权限才能发送通知。\n\n点击下方按钮以请求权限。"
                     button.isEnabled = true
 
                 case .authorized:
@@ -82,13 +82,13 @@ class PermissionHelper {
                     self.finish(granted: true)
 
                 case .denied:
-                    self.label?.stringValue = "⚠️ Notifications are denied.\n\nPlease enable in System Settings → Notifications → ntfy-macos"
-                    button.title = "Open System Settings"
+                    self.label?.stringValue = "⚠️ 通知权限已被拒绝。\n\n请前往 系统设置 → 通知 → ntfy-macos 手动开启"
+                    button.title = "打开系统设置"
                     button.isEnabled = true
                     button.action = #selector(PermissionHelperTarget.openSettings)
 
                 default:
-                    self.label?.stringValue = "⚠️ Notification status: \(status.rawValue)"
+                    self.label?.stringValue = "⚠️ 通知权限状态：\(status.rawValue)"
                     button.isHidden = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                         self.finish(granted: false)
@@ -99,7 +99,7 @@ class PermissionHelper {
     }
 
     static func requestPermission() {
-        label?.stringValue = "Requesting permission..."
+        label?.stringValue = "正在请求权限…"
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             DispatchQueue.main.async {
@@ -111,13 +111,13 @@ class PermissionHelper {
                     }
                 } else if granted {
                     print("✅ Permission granted!")
-                    self.label?.stringValue = "✅ Permission granted!\n\nNotifications are now enabled."
+                    self.label?.stringValue = "✅ 权限已授予！\n\n通知功能已开启。"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                         self.finish(granted: true)
                     }
                 } else {
                     print("❌ Permission denied")
-                    self.label?.stringValue = "❌ Permission denied.\n\nYou can enable notifications in System Settings."
+                    self.label?.stringValue = "❌ 权限被拒绝。\n\n你可以在系统设置中开启通知。"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                         self.finish(granted: false)
                     }
@@ -141,8 +141,7 @@ class PermissionHelper {
         window?.close()
         window = nil
         label = nil
-        // Re-apply accessory policy to prevent Dock icon from lingering
-        NSApp.setActivationPolicy(.accessory)
+        AppMode.demoteToAccessoryIfNeeded()
         callback?(granted)
     }
 }

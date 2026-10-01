@@ -53,53 +53,53 @@ enum NtfyError: Error, LocalizedError, Sendable {
         switch self {
         // Config errors
         case .configNotFound(let path):
-            return "Configuration file not found at: \(path)"
+            return "未找到配置文件：\(path)"
         case .configInvalid(let reason):
-            return "Configuration is invalid: \(reason)"
+            return "配置无效：\(reason)"
         case .configValidationFailed(let field, let reason):
-            return "Validation failed for '\(field)': \(reason)"
+            return "'\(field)' 校验失败：\(reason)"
         case .insecureFilePermissions(let message):
             return message
         case .unknownConfigKeys(let details):
-            return "Unknown configuration keys:\n\(details)"
+            return "未知配置项：\n\(details)"
             
         // Keychain errors
         case .keychainInvalidData:
-            return "Invalid data provided for keychain operation"
+            return "提供给钥匙串操作的数据无效"
         case .keychainItemNotFound:
-            return "Item not found in keychain"
+            return "钥匙串中未找到该条目"
         case .keychainUnexpectedStatus(let status):
-            return "Keychain error: \(status)"
+            return "钥匙串错误：\(status)"
             
         // Server errors
         case .serverConnectionFailed(let url, let error):
-            var message = "Failed to connect to \(url)"
+            var message = "连接 \(url) 失败"
             if let error = error {
                 message += ": \(error.localizedDescription)"
             }
             return message
         case .serverAuthenticationFailed(let url):
-            return "Authentication failed for \(url)"
+            return "\(url) 认证失败"
         case .serverTimeout(let url):
-            return "Connection timeout for \(url)"
+            return "\(url) 连接超时"
         case .serverInvalidURL(let url):
-            return "Invalid server URL: \(url)"
+            return "服务器地址无效：\(url)"
             
         // Script errors
         case .scriptNotFound(let path):
-            return "Script not found at: \(path)"
+            return "未找到脚本：\(path)"
         case .scriptNotExecutable(let path):
-            return "Script is not executable: \(path)"
+            return "脚本无执行权限：\(path)"
         case .scriptExecutionFailed(let path, let code):
-            return "Script '\(path)' exited with code \(code)"
+            return "脚本 '\(path)' 以退出码 \(code) 结束"
         case .scriptTimeout(let path):
-            return "Script timed out: \(path)"
+            return "脚本执行超时：\(path)"
             
         // Notification errors
         case .notificationPermissionDenied:
-            return "Notification permission denied"
+            return "通知权限被拒绝"
         case .notificationDeliveryFailed(let error):
-            var message = "Notification delivery failed"
+            var message = "通知发送失败"
             if let error = error {
                 message += ": \(error.localizedDescription)"
             }
@@ -107,9 +107,9 @@ enum NtfyError: Error, LocalizedError, Sendable {
             
         // Local server errors
         case .localServerPortInUse(let port):
-            return "Local server port \(port) is already in use"
+            return "本地服务器端口 \(port) 已被占用"
         case .localServerFailed(let port, let error):
-            var message = "Local server failed on port \(port)"
+            var message = "本地服务器在端口 \(port) 上启动失败"
             if let error = error {
                 message += ": \(error.localizedDescription)"
             }
@@ -121,33 +121,33 @@ enum NtfyError: Error, LocalizedError, Sendable {
     var recoverySuggestion: String? {
         switch self {
         case .configNotFound:
-            return "Run 'ntfy-macos init' to create a sample configuration"
+            return "运行 'ntfy-macos init' 创建示例配置"
         case .configInvalid, .configValidationFailed:
-            return "Check your config.yml file for syntax errors"
+            return "请检查 config.yml 文件中的语法错误"
         case .insecureFilePermissions:
-            return "Run 'chmod 600 ~/.config/ntfy-macos/config.yml' to secure your config file"
+            return "运行 'chmod 600 ~/.config/ntfy-macos/config.yml' 加固配置文件权限"
         case .unknownConfigKeys:
-            return "Remove unknown keys from your config.yml"
+            return "请从 config.yml 中移除未知配置项"
         case .keychainItemNotFound:
-            return "Run 'ntfy-macos auth add <server> <token>' to store authentication"
+            return "运行 'ntfy-macos auth add <server> <token>' 存储认证信息"
         case .keychainUnexpectedStatus:
-            return "Check your Keychain access settings in System Settings"
+            return "请在系统设置中检查钥匙串访问权限"
         case .serverConnectionFailed:
-            return "Check your server URL and network connection"
+            return "请检查服务器地址与网络连接"
         case .serverAuthenticationFailed:
-            return "Verify your authentication token with 'ntfy-macos auth list'"
+            return "用 'ntfy-macos auth list' 核对认证令牌"
         case .serverTimeout:
-            return "Check if your server is reachable"
+            return "请确认服务器是否可达"
         case .serverInvalidURL:
-            return "URL must use http or https scheme"
+            return "地址必须使用 http 或 https 协议"
         case .scriptNotFound:
-            return "Verify the script path exists"
+            return "请确认脚本路径存在"
         case .scriptNotExecutable:
-            return "Run 'chmod +x <script-path>' to make the script executable"
+            return "运行 'chmod +x <script-path>' 赋予脚本执行权限"
         case .notificationPermissionDenied:
-            return "Enable notifications in System Settings → Notifications → ntfy-macos"
+            return "前往 系统设置 → 通知 → ntfy-macos 开启通知"
         case .localServerPortInUse:
-            return "Choose a different port in your config.yml"
+            return "请在 config.yml 中更换端口"
         default:
             return nil
         }

@@ -3,6 +3,10 @@ import Network
 
 @preconcurrency protocol NtfyClientDelegate: AnyObject {
     func ntfyClient(_ client: NtfyClient, didReceiveMessage message: NtfyMessage)
+    /// Receives server-side action events: "message_delete" (target is gone) and
+    /// "message_clear" (target was marked read). The event's sequenceId (or id)
+    /// identifies the target message; the event's own id is freshly generated.
+    func ntfyClient(_ client: NtfyClient, didReceiveActionEvent event: NtfyMessage)
     func ntfyClient(_ client: NtfyClient, didEncounterError error: Error)
     func ntfyClientDidConnect(_ client: NtfyClient)
     func ntfyClientDidDisconnect(_ client: NtfyClient)
@@ -21,10 +25,22 @@ struct NtfyMessage: Codable {
     let actions: [NtfyAction]?
     let attachment: NtfyAttachment?
     let contentType: String?  // "text/markdown" when markdown is enabled
+    let sequenceId: String?   // fork extension: stable id for update/delete/clear operations
 
     enum CodingKeys: String, CodingKey {
         case id, time, event, topic, message, title, priority, tags, click, actions, attachment
         case contentType = "content_type"
+        case sequenceId = "sequence_id"
+    }
+
+    /// Server events that act on an already-published message. `clearEvent` is what the
+    /// server broadcasts for `/<topic>/<seq>/read|clear`, i.e. "mark as read".
+    static let deleteEvent = "message_delete"
+    static let clearEvent = "message_clear"
+
+    /// True for events that change an existing message instead of delivering a new one.
+    var isActionEvent: Bool {
+        event == Self.deleteEvent || event == Self.clearEvent
     }
 
     /// Returns true if this message contains markdown content
@@ -355,6 +371,10 @@ final class NtfyClient: NSObject, @unchecked Sendable {
             if message.event == "message" {
                 callDelegate { delegate in
                     delegate.ntfyClient(self, didReceiveMessage: message)
+                }
+            } else if message.isActionEvent {
+                callDelegate { delegate in
+                    delegate.ntfyClient(self, didReceiveActionEvent: message)
                 }
             }
         } catch {

@@ -1,0 +1,451 @@
+import Foundation
+
+/// Actor-backed SQLite store for notification history.
+/// All access is serialized by the actor; the single SQLite connection is
+/// opened with FULLMUTEX and WAL mode for safe concurrent reads from tests/tools.
+actor MessageStore {
+    private let db: SQLiteDatabase
+
+    // MARK: - DDL
+
+    private static let schema = """
+    PRAGMA journal_mode=WAL;
+    PRAGMA busy_timeout=5000;
+
+    CREATE TABLE IF NOT EXISTS messages (
+        rowid_pk        INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_url      TEXT    NOT NULL,
+        topic           TEXT    NOT NULL,
+        msg_id          TEXT    NOT NULL,
+        sequence_id     TEXT,
+        event           TEXT    NOT NULL DEFAULT 'message',
+        time            INTEGER NOT NULL,
+        message         TEXT,
+        title           TEXT,
+        priority        INTEGER,
+        tags_json       TEXT,
+        click           TEXT,
+        actions_json    TEXT,
+        attachment_json TEXT,
+        content_type    TEXT,
+        is_read         INTEGER NOT NULL DEFAULT 0,
+        is_deleted      INTEGER NOT NULL DEFAULT 0,
+        deleted_at      INTEGER,
+        raw_json        TEXT,
+        UNIQUE(server_url, topic, msg_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_msg_topic_time ON messages(server_url, topic, time DESC);
+    CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages(server_url, topic) WHERE is_read = 0 AND is_deleted = 0;
+    CREATE INDEX IF NOT EXISTS idx_msg_sequence ON messages(server_url, topic, sequence_id) WHERE sequence_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS sync_state (
+        server_url       TEXT NOT NULL,
+        topic            TEXT NOT NULL,
+        last_synced_id   TEXT,
+        last_synced_time INTEGER,
+        last_sync_at     INTEGER,
+        PRIMARY KEY(server_url, topic)
+    );
+    """
+
+    // MARK: - Init
+
+    init(dbPath: String) throws {
+        if dbPath != ":memory:" {
+            let directory = (dbPath as NSString).deletingLastPathComponent
+            if !directory.isEmpty {
+                try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            }
+        }
+        db = try SQLiteDatabase(path: dbPath)
+        try db.execute(Self.schema)
+    }
+
+    /// In-memory store for testing.
+    static func inMemory() throws -> MessageStore {
+        try MessageStore(dbPath: ":memory:")
+    }
+
+    /// Default on-disk location: ~/Library/Application Support/ntfy-macos/history.db
+    static var defaultDatabasePath: String {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        return appSupport.appendingPathComponent("ntfy-macos/history.db").path
+    }
+
+    // MARK: - Upsert
+
+    /// Inserts a message. Existing rows are left untouched (keeps read/tombstone state),
+    /// which makes poll replays idempotent and prevents deleted messages from "resurrecting".
+    func upsert(_ message: NtfyMessage, serverURL: String, rawJSON: String? = nil) throws {
+        let sql = """
+        INSERT OR IGNORE INTO messages
+            (server_url, topic, msg_id, sequence_id, event, time, message, title, priority,
+             tags_json, click, actions_json, attachment_json, content_type, is_read, is_deleted, raw_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+        """
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+
+        try statement.bindText(serverURL, at: 1)
+        try statement.bindText(message.topic, at: 2)
+        try statement.bindText(message.id, at: 3)
+        try statement.bindOptionalText(message.sequenceId, at: 4)
+        try statement.bindText(message.event, at: 5)
+        try statement.bindInt(message.time, at: 6)
+        try statement.bindOptionalText(message.message, at: 7)
+        try statement.bindOptionalText(message.title, at: 8)
+        try statement.bindOptionalInt(message.priority, at: 9)
+        try statement.bindOptionalText(Self.encodedJSON(message.tags), at: 10)
+        try statement.bindOptionalText(message.click, at: 11)
+        try statement.bindOptionalText(Self.encodedJSON(message.actions), at: 12)
+        try statement.bindOptionalText(Self.encodedJSON(message.attachment), at: 13)
+        try statement.bindOptionalText(message.contentType, at: 14)
+        try statement.bindOptionalText(rawJSON, at: 15)
+        try statement.run()
+    }
+
+    // MARK: - Action events (message_delete / message_clear)
+
+    /// `WHERE` clause locating the row an action event targets. The event carries a freshly
+    /// generated id of its own, so the target is the `sequence_id` the server echoes back —
+    /// either a real sequence id or, for messages without one, the message id the publishing
+    /// client put in the URL. The event id is matched as a last resort, for events published
+    /// by older clients.
+    ///
+    /// Placeholder order: server url, topic, sequence id ×3, event id ×2. Every action-event
+    /// statement has to go through this fragment, otherwise they stop agreeing on the row.
+    private static let actionTargetWhere = """
+    WHERE server_url = ? AND topic = ?
+      AND (   (? IS NOT NULL AND (sequence_id = ? OR msg_id = ?))
+           OR (? IS NOT NULL AND msg_id = ?))
+    """
+
+    private func bindActionTarget(
+        _ statement: SQLiteStatement,
+        offset: Int32,
+        serverURL: String,
+        topic: String,
+        sequenceID: String?,
+        eventID: String?
+    ) throws {
+        try statement.bindText(serverURL, at: offset)
+        try statement.bindText(topic, at: offset + 1)
+        try statement.bindOptionalText(sequenceID, at: offset + 2)
+        try statement.bindOptionalText(sequenceID, at: offset + 3)
+        try statement.bindOptionalText(sequenceID, at: offset + 4)
+        try statement.bindOptionalText(eventID, at: offset + 5)
+        try statement.bindOptionalText(eventID, at: offset + 6)
+    }
+
+    /// Applies a server-side action event to its target message.
+    /// `message_delete` tombstones the row; `message_clear` — the event the server
+    /// publishes for `/<topic>/<seq>/read|clear` — only marks it read.
+    /// - Returns: true if a row was affected.
+    @discardableResult
+    func applyActionEvent(_ event: NtfyMessage, serverURL: String) throws -> Bool {
+        if event.event == NtfyMessage.clearEvent {
+            return try applyReadEvent(
+                serverURL: serverURL, topic: event.topic,
+                targetSequenceID: event.sequenceId, targetMessageID: event.id
+            )
+        }
+        return try applyDeleteEvent(
+            serverURL: serverURL, topic: event.topic,
+            targetSequenceID: event.sequenceId, targetMessageID: event.id
+        )
+    }
+
+    /// The stored row's message id for an action event's target, or nil when the store has
+    /// never seen that message. The event names its target by sequence id, so this is what
+    /// maps it back to the id the message was delivered and bannered under.
+    func targetMessageID(for event: NtfyMessage, serverURL: String) throws -> String? {
+        let sql = """
+        SELECT msg_id FROM messages
+        \(Self.actionTargetWhere)
+        LIMIT 1
+        """
+        let ids = try db.query(sql, bind: { statement in
+            try self.bindActionTarget(
+                statement, offset: 1,
+                serverURL: serverURL, topic: event.topic,
+                sequenceID: event.sequenceId, eventID: event.id
+            )
+        }, row: { statement in
+            statement.columnText(0) ?? ""
+        })
+        return ids.first(where: { !$0.isEmpty })
+    }
+
+    /// Applies a server-side `message_delete` event by tombstoning the target message.
+    /// - Returns: true if a row was affected.
+    @discardableResult
+    func applyDeleteEvent(serverURL: String, topic: String, targetSequenceID: String?, targetMessageID: String?) throws -> Bool {
+        let sql = """
+        UPDATE messages
+        SET is_deleted = 1, deleted_at = ?
+        \(Self.actionTargetWhere)
+        """
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+
+        try statement.bindInt(Int(Date().timeIntervalSince1970), at: 1)
+        try bindActionTarget(
+            statement, offset: 2,
+            serverURL: serverURL, topic: topic,
+            sequenceID: targetSequenceID, eventID: targetMessageID
+        )
+        try statement.run()
+        return db.changesCount > 0
+    }
+
+    // MARK: - Read state
+
+    func markRead(_ read: Bool, serverURL: String, topic: String, messageID: String) throws {
+        let sql = "UPDATE messages SET is_read = ? WHERE server_url = ? AND topic = ? AND msg_id = ?"
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+        try statement.bindInt(read ? 1 : 0, at: 1)
+        try statement.bindText(serverURL, at: 2)
+        try statement.bindText(topic, at: 3)
+        try statement.bindText(messageID, at: 4)
+        try statement.run()
+    }
+
+    func markAllRead(_ read: Bool = true, serverURL: String, topic: String) throws {
+        let sql = "UPDATE messages SET is_read = ? WHERE server_url = ? AND topic = ? AND is_deleted = 0"
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+        try statement.bindInt(read ? 1 : 0, at: 1)
+        try statement.bindText(serverURL, at: 2)
+        try statement.bindText(topic, at: 3)
+        try statement.run()
+    }
+
+    /// Applies a server-side `message_clear` event (the server's "mark as read"): the
+    /// target stays in the list, only its read flag flips, so the unread badge drops.
+    /// Matching works exactly like `applyDeleteEvent`.
+    /// - Returns: true if a row was affected.
+    @discardableResult
+    func applyReadEvent(serverURL: String, topic: String, targetSequenceID: String?, targetMessageID: String?) throws -> Bool {
+        let sql = """
+        UPDATE messages
+        SET is_read = 1
+        \(Self.actionTargetWhere)
+          AND is_deleted = 0
+        """
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+
+        try bindActionTarget(
+            statement, offset: 1,
+            serverURL: serverURL, topic: topic,
+            sequenceID: targetSequenceID, eventID: targetMessageID
+        )
+        try statement.run()
+        return db.changesCount > 0
+    }
+
+    // MARK: - Tombstoning
+
+    /// Locally deletes (tombstones) a single message.
+    @discardableResult
+    func tombstoneMessage(serverURL: String, topic: String, messageID: String) throws -> Bool {
+        let sql = "UPDATE messages SET is_deleted = 1, deleted_at = ? WHERE server_url = ? AND topic = ? AND msg_id = ?"
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+        try statement.bindInt(Int(Date().timeIntervalSince1970), at: 1)
+        try statement.bindText(serverURL, at: 2)
+        try statement.bindText(topic, at: 3)
+        try statement.bindText(messageID, at: 4)
+        try statement.run()
+        return db.changesCount > 0
+    }
+
+    /// Locally clears (tombstones) all messages of a topic.
+    func tombstoneAll(serverURL: String, topic: String) throws {
+        let sql = "UPDATE messages SET is_deleted = 1, deleted_at = ? WHERE server_url = ? AND topic = ? AND is_deleted = 0"
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+        try statement.bindInt(Int(Date().timeIntervalSince1970), at: 1)
+        try statement.bindText(serverURL, at: 2)
+        try statement.bindText(topic, at: 3)
+        try statement.run()
+    }
+
+    // MARK: - Queries
+
+    /// Fetches messages of a topic, newest first, with cursor pagination.
+    /// - Parameters:
+    ///   - limit: max rows to return.
+    ///   - beforeTime: only return messages strictly older than this unix timestamp (cursor for "load older").
+    ///   - onlyUnread: filter to unread messages only.
+    ///   - searchText: substring match on title/message (case-insensitive).
+    func messages(
+        serverURL: String,
+        topic: String,
+        limit: Int = 100,
+        beforeTime: Int? = nil,
+        onlyUnread: Bool = false,
+        searchText: String? = nil
+    ) throws -> [StoredMessage] {
+        var sql = """
+        SELECT server_url, topic, msg_id, sequence_id, event, time, message, title, priority,
+               tags_json, click, actions_json, attachment_json, content_type, is_read, is_deleted
+        FROM messages
+        WHERE server_url = ? AND topic = ? AND is_deleted = 0
+        """
+        var bindings: [SQLValue] = [.text(serverURL), .text(topic)]
+
+        if let beforeTime {
+            sql += " AND time < ?"
+            bindings.append(.int(beforeTime))
+        }
+        if onlyUnread {
+            sql += " AND is_read = 0"
+        }
+        if let searchText, !searchText.isEmpty {
+            sql += " AND (title LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\')"
+            let escaped = searchText
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+            let pattern = "%\(escaped)%"
+            bindings.append(.text(pattern))
+            bindings.append(.text(pattern))
+        }
+        sql += " ORDER BY time DESC, rowid_pk DESC LIMIT ?"
+        bindings.append(.int(limit))
+
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+        for (offset, value) in bindings.enumerated() {
+            try value.bind(to: statement, at: Int32(offset + 1))
+        }
+
+        var results: [StoredMessage] = []
+        while try statement.step() {
+            results.append(try Self.storedMessage(from: statement, serverURL: serverURL, topic: topic))
+        }
+        return results
+    }
+
+    /// Unread counts per topic, excluding tombstoned messages.
+    func unreadCountsByTopic() throws -> [TopicRef: Int] {
+        let sql = """
+        SELECT server_url, topic, COUNT(*) FROM messages
+        WHERE is_deleted = 0 AND is_read = 0
+        GROUP BY server_url, topic
+        """
+        let rows = try db.query(sql, bind: { _ in }, row: { statement -> (TopicRef, Int) in
+            let serverURL = statement.columnText(0) ?? ""
+            let topic = statement.columnText(1) ?? ""
+            let count = statement.columnInt(2) ?? 0
+            return (TopicRef(serverURL: serverURL, topic: topic), count)
+        })
+        return rows.reduce(into: [TopicRef: Int]()) { $0[$1.0] = $1.1 }
+    }
+
+    /// Total unread count across all topics.
+    func totalUnreadCount() throws -> Int {
+        let sql = "SELECT COUNT(*) FROM messages WHERE is_deleted = 0 AND is_read = 0"
+        let rows = try db.query(sql, bind: { _ in }, row: { statement -> Int in
+            statement.columnInt(0) ?? 0
+        })
+        return rows.first ?? 0
+    }
+
+    /// Number of non-deleted messages stored for a topic.
+    func messageCount(serverURL: String, topic: String) throws -> Int {
+        let sql = "SELECT COUNT(*) FROM messages WHERE server_url = ? AND topic = ? AND is_deleted = 0"
+        let rows = try db.query(sql, bind: { statement in
+            try statement.bindText(serverURL, at: 1)
+            try statement.bindText(topic, at: 2)
+        }, row: { statement -> Int in
+            statement.columnInt(0) ?? 0
+        })
+        return rows.first ?? 0
+    }
+
+    // MARK: - Sync state
+
+    func latestSyncedInfo(serverURL: String, topic: String) throws -> (id: String?, time: Int)? {
+        let sql = "SELECT last_synced_id, last_synced_time FROM sync_state WHERE server_url = ? AND topic = ?"
+        let rows = try db.query(sql, bind: { statement in
+            try statement.bindText(serverURL, at: 1)
+            try statement.bindText(topic, at: 2)
+        }, row: { statement -> (id: String?, time: Int) in
+            (id: statement.columnText(0), time: statement.columnInt(1) ?? 0)
+        })
+        return rows.first
+    }
+
+    func setSyncedInfo(serverURL: String, topic: String, id: String?, time: Int) throws {
+        let sql = """
+        INSERT INTO sync_state (server_url, topic, last_synced_id, last_synced_time, last_sync_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(server_url, topic) DO UPDATE SET
+            last_synced_id = excluded.last_synced_id,
+            last_synced_time = excluded.last_synced_time,
+            last_sync_at = excluded.last_sync_at
+        """
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+        try statement.bindText(serverURL, at: 1)
+        try statement.bindText(topic, at: 2)
+        try statement.bindOptionalText(id, at: 3)
+        try statement.bindInt(time, at: 4)
+        try statement.bindInt(Int(Date().timeIntervalSince1970), at: 5)
+        try statement.run()
+    }
+
+    // MARK: - Helpers
+
+    private enum SQLValue {
+        case text(String)
+        case int(Int)
+
+        func bind(to statement: SQLiteStatement, at index: Int32) throws {
+            switch self {
+            case .text(let value): try statement.bindText(value, at: index)
+            case .int(let value): try statement.bindInt(value, at: index)
+            }
+        }
+    }
+
+    private static func encodedJSON<T: Encodable>(_ value: T?) -> String? {
+        guard let value else { return nil }
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func decodedJSON<T: Decodable>(_ type: T.Type, from string: String?) -> T? {
+        guard let string, let data = string.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    private static func storedMessage(from statement: SQLiteStatement, serverURL: String, topic: String) throws -> StoredMessage {
+        let message = NtfyMessage(
+            id: statement.columnText(2) ?? "",
+            time: statement.columnInt(5) ?? 0,
+            event: statement.columnText(4) ?? "message",
+            topic: statement.columnText(1) ?? topic,
+            message: statement.columnText(6),
+            title: statement.columnText(7),
+            priority: statement.columnInt(8),
+            tags: decodedJSON([String].self, from: statement.columnText(9)),
+            click: statement.columnText(10),
+            actions: decodedJSON([NtfyMessage.NtfyAction].self, from: statement.columnText(11)),
+            attachment: decodedJSON(NtfyMessage.NtfyAttachment.self, from: statement.columnText(12)),
+            contentType: statement.columnText(13),
+            sequenceId: statement.columnText(3)
+        )
+        return StoredMessage(
+            serverURL: statement.columnText(0) ?? serverURL,
+            topic: topic,
+            message: message,
+            isRead: (statement.columnInt(14) ?? 0) == 1,
+            isDeleted: (statement.columnInt(15) ?? 0) == 1
+        )
+    }
+}

@@ -17,6 +17,27 @@ enum AppConstants {
     }
 }
 
+/// Reports a fatal startup problem. A double-clicked app has no terminal to write to,
+/// so it reports through an alert instead.
+private func fatalStartup(_ message: String, details: String? = nil) -> Never {
+    if AppMode.isDockApp {
+        // Startup only ever runs on the main queue, from CLI.main().
+        MainActor.assumeIsolated {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = message
+            alert.informativeText = details ?? ""
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+        }
+    } else {
+        print(message)
+        if let details { print(details) }
+    }
+    exit(1)
+}
+
 final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
     private var clients: [NtfyClient] = []
     private var clientToServer: [ObjectIdentifier: String] = [:]  // Maps client to server URL
@@ -24,6 +45,8 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
     private let scriptRunner = ScriptRunner()
     private var configWatcher: ConfigWatcher?
     private var localServer: LocalNotificationServer?
+    private var messageStore: MessageStore?
+    private var historySync: HistorySyncService?
 
     init() {
         // Don't initialize notificationManager here - wait until it's needed
@@ -37,36 +60,53 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
         return notificationManager!
     }
 
+    /// Opens (or creates) the local history database and wires the history window.
+    private func setupHistoryStore() {
+        guard messageStore == nil else { return }
+        do {
+            let store = try MessageStore(dbPath: MessageStore.defaultDatabasePath)
+            messageStore = store
+            Task { @MainActor in
+                let sync = HistorySyncService(store: store)
+                self.historySync = sync
+                HistoryWindowController.shared.configure(store: store, syncService: sync)
+            }
+            Log.info("History database opened at \(MessageStore.defaultDatabasePath)")
+        } catch {
+            // History is an enhancement; the notification service must keep working without it.
+            Log.error("Failed to open history database (history disabled): \(error)")
+        }
+    }
+
     func serve(configPath: String? = nil) {
         Log.info("Starting ntfy-macos service...")
 
         do {
             try ConfigManager.shared.loadConfig(from: configPath)
         } catch ConfigError.fileNotFound {
-            print("Configuration file not found.")
-            print("Creating sample configuration at \(ConfigManager.defaultConfigPath)")
+            // The sample always belongs next to the config that was actually requested,
+            // never silently at the default path.
+            let samplePath = configPath ?? ConfigManager.defaultConfigPath
             do {
-                try ConfigManager.createSampleConfig()
-                print("Sample configuration created. Please edit it and restart the service.")
-                exit(1)
+                let created = try ConfigManager.createSampleConfig(at: samplePath)
+                fatalStartup("未找到配置文件。",
+                             details: created
+                                 ? "已在 \(samplePath) 创建示例配置。请编辑该文件后重新启动服务。"
+                                 : "请在 \(samplePath) 创建配置后重新启动服务。")
             } catch {
-                print("Failed to create sample configuration: \(error)")
-                exit(1)
+                fatalStartup("未找到配置文件，且创建示例配置失败。", details: "\(error)")
             }
         } catch {
-            print("Failed to load configuration: \(error)")
-            exit(1)
+            fatalStartup("加载配置失败。", details: "\(error)")
         }
 
         guard let config = ConfigManager.shared.config else {
-            print("Configuration is invalid")
-            exit(1)
+            fatalStartup("配置无效。")
         }
 
         let allTopics = config.allTopics.map { $0.name }
         guard !allTopics.isEmpty else {
-            print("No topics configured")
-            exit(1)
+            fatalStartup("未配置任何主题。")
         }
 
         Log.info("ntfy-macos v\(AppConstants.effectiveVersion) starting...")
@@ -75,6 +115,9 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
             let topics = server.topics.map { $0.name }.joined(separator: ", ")
             Log.info("  - \(server.url): \(topics)")
         }
+
+        // Open the history database and wire the history window
+        setupHistoryStore()
 
         // Start watching config file for changes
         configWatcher = ConfigWatcher(configPath: configPath)
@@ -85,7 +128,7 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
 
     func startService() {
         guard ConfigManager.shared.config != nil else {
-            print("Configuration is invalid")
+            print("配置无效")
             fflush(stdout)
             return
         }
@@ -120,7 +163,13 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
                         } else {
                             Log.error("Notification permission not granted")
                             Log.info("   Please enable notifications in System Settings → Notifications → ntfy-macos")
-                            exit(1)
+                            if AppMode.isDockApp {
+                                // Keep the window open so the user can read history and
+                                // retry from System Settings without losing the app.
+                                self.connectClients()
+                            } else {
+                                exit(1)
+                            }
                         }
                     }
                 }
@@ -255,6 +304,19 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
 
         let topicConfig = ConfigManager.shared.topicConfig(for: message.topic)
 
+        // Persist to the history store (if available)
+        if let store = messageStore, let serverURL = clientToServer[ObjectIdentifier(client)] {
+            Task {
+                try? await store.upsert(message, serverURL: serverURL)
+                NotificationCenter.default.post(
+                    name: .historyStoreDidChange,
+                    object: nil,
+                    userInfo: ["topicRef": TopicRef(serverURL: serverURL, topic: message.topic)]
+                )
+                refreshUnreadBadge(store: store)
+            }
+        }
+
         // Handle auto-run scripts
         if let autoRunScript = topicConfig?.autoRunScript {
             if scriptRunner.validateScript(at: autoRunScript) {
@@ -277,6 +339,35 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
 
         // Show notification (respects silent flag)
         ensureNotificationManager().showNotification(for: message, topicConfig: topicConfig)
+    }
+
+    /// Handles server-side "message_delete" (gone) / "message_clear" (marked read)
+    /// events by applying them to the matching row in the local history store.
+    func ntfyClient(_ client: NtfyClient, didReceiveActionEvent event: NtfyMessage) {
+        guard let store = messageStore, let serverURL = clientToServer[ObjectIdentifier(client)] else { return }
+
+        Task {
+            try? await store.applyActionEvent(event, serverURL: serverURL)
+            // The banner lives in Notification Center, not in the history database:
+            // a remote read or delete has to withdraw it explicitly.
+            if let messageID = try? await store.targetMessageID(for: event, serverURL: serverURL) {
+                ensureNotificationManager().revoke(messageIDs: [messageID])
+            }
+            NotificationCenter.default.post(
+                name: .historyStoreDidChange,
+                object: nil,
+                userInfo: ["topicRef": TopicRef(serverURL: serverURL, topic: event.topic)]
+            )
+            refreshUnreadBadge(store: store)
+        }
+    }
+
+    /// Refreshes the unread badge on the status bar icon.
+    private func refreshUnreadBadge(store: MessageStore) {
+        Task { @MainActor in
+            let total = (try? await store.totalUnreadCount()) ?? 0
+            StatusBarController.shared.setUnreadCount(total)
+        }
     }
 
     func ntfyClient(_ client: NtfyClient, didEncounterError error: Error) {
@@ -318,12 +409,12 @@ struct CLI {
         // When launched without arguments (e.g., via double-click or `open`),
         // start serve mode directly
         if arguments.count < 2 {
-            print("🚀 Starting ntfy-macos service...")
+            print("🚀 正在启动 ntfy-macos 服务…")
             ntfyAppInstance = NtfyMacOS()
             ntfyAppInstance?.serve(configPath: nil)
 
             guard ConfigManager.shared.config != nil else {
-                print("Configuration is invalid. Run 'ntfy-macos serve' to create a sample config.")
+                print("配置无效。请运行 'ntfy-macos serve' 创建示例配置。")
                 return false
             }
 
@@ -331,6 +422,11 @@ struct CLI {
             // Use Timer to ensure RunLoop is actively running
             Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [ntfyAppInstance] _ in
                 ntfyAppInstance?.startService()
+                if AppMode.isDockApp {
+                    MainActor.assumeIsolated {
+                        HistoryWindowController.shared.showHistory()
+                    }
+                }
             }
 
             return true // Needs RunLoop
@@ -346,7 +442,7 @@ struct CLI {
 
             // Extract config for later use
             guard ConfigManager.shared.config != nil else {
-                print("Configuration is invalid")
+                print("配置无效")
                 exit(1)
             }
 
@@ -375,7 +471,7 @@ struct CLI {
             exit(0)
 
         default:
-            print("Unknown command: \(command)")
+            print("未知命令：\(command)")
             printUsage()
             exit(1)
         }
@@ -394,7 +490,7 @@ struct CLI {
         case "add":
             // ntfy-macos auth add <server-url> <token>
             guard arguments.count >= 5 else {
-                print("Usage: ntfy-macos auth add <server-url> <token>")
+                print("用法：ntfy-macos auth add <server-url> <token>")
                 exit(1)
             }
             let server = arguments[3]
@@ -402,9 +498,9 @@ struct CLI {
 
             do {
                 try KeychainHelper.saveToken(token, forServer: server)
-                print("✅ Token saved for server: \(server)")
+                print("✅ 已为服务器保存令牌：\(server)")
             } catch {
-                print("❌ Failed to save token: \(error)")
+                print("❌ 保存令牌失败：\(error)")
                 exit(1)
             }
 
@@ -413,36 +509,36 @@ struct CLI {
             do {
                 let servers = try KeychainHelper.listServers()
                 if servers.isEmpty {
-                    print("No tokens stored in Keychain.")
+                    print("钥匙串中未存储任何令牌。")
                 } else {
-                    print("Stored tokens for servers:")
+                    print("已为以下服务器存储令牌：")
                     for server in servers {
                         print("  • \(server)")
                     }
                 }
             } catch {
-                print("❌ Failed to list servers: \(error)")
+                print("❌ 列出服务器失败：\(error)")
                 exit(1)
             }
 
         case "remove":
             // ntfy-macos auth remove <server-url>
             guard arguments.count >= 4 else {
-                print("Usage: ntfy-macos auth remove <server-url>")
+                print("用法：ntfy-macos auth remove <server-url>")
                 exit(1)
             }
             let server = arguments[3]
 
             do {
                 try KeychainHelper.deleteToken(forServer: server)
-                print("✅ Token removed for server: \(server)")
+                print("✅ 已删除服务器的令牌：\(server)")
             } catch {
-                print("❌ Failed to remove token: \(error)")
+                print("❌ 删除令牌失败：\(error)")
                 exit(1)
             }
 
         default:
-            print("Unknown auth subcommand: \(subcommand)")
+            print("未知的 auth 子命令：\(subcommand)")
             printAuthUsage()
             exit(1)
         }
@@ -450,14 +546,14 @@ struct CLI {
 
     static func printAuthUsage() {
         print("""
-        Usage: ntfy-macos auth <subcommand>
+        用法：ntfy-macos auth <子命令>
 
-        Subcommands:
-            add <server-url> <token>    Store a token in Keychain
-            list                        List all servers with stored tokens
-            remove <server-url>         Remove a token from Keychain
+        子命令：
+            add <server-url> <token>    将令牌存入钥匙串
+            list                        列出所有已存令牌的服务器
+            remove <server-url>         从钥匙串删除令牌
 
-        Examples:
+        示例：
             ntfy-macos auth add https://ntfy.sh tk_mytoken
             ntfy-macos auth list
             ntfy-macos auth remove https://ntfy.sh
@@ -467,27 +563,27 @@ struct CLI {
     @MainActor
     static func handleTestNotify(arguments: [String]) {
         guard let topic = getFlag(arguments: arguments, flag: "--topic") else {
-            print("Usage: ntfy-macos test-notify --topic <NAME>")
+            print("用法：ntfy-macos test-notify --topic <NAME>")
             exit(1)
         }
 
-        print("🚀 Requesting notification permissions with GUI window...")
+        print("🚀 正在通过 GUI 窗口请求通知权限…")
 
         PermissionHelper.requestPermissionsWithWindow { granted in
             Task { @MainActor in
                 if granted {
                     let notificationManager = NotificationManager.shared
                     notificationManager.showTestNotification(topic: topic)
-                    print("✅ Test notification sent for topic: \(topic)")
+                    print("✅ 已发送主题 \(topic) 的测试通知")
                     // Give time for notification to be delivered, then exit cleanly
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         NSApp.terminate(nil)
                     }
                 } else {
-                    print("❌ Notification permission denied")
+                    print("❌ 通知权限被拒绝")
                     print("")
-                    print("💡 The app should now appear in System Settings → Notifications")
-                    print("   Please enable notifications there and try again.")
+                    print("💡 应用现在应已出现在 系统设置 → 通知 中")
+                    print("   请在其中开启通知后重试。")
                     NSApp.terminate(nil)
                 }
             }
@@ -500,11 +596,14 @@ struct CLI {
         let configPath = getFlag(arguments: arguments, flag: "--path") ?? ConfigManager.defaultConfigPath
 
         do {
-            try ConfigManager.createSampleConfig(at: configPath)
-            print("Sample configuration created at: \(configPath)")
-            print("Please edit the configuration file and run 'ntfy-macos serve' to start the service.")
+            if try ConfigManager.createSampleConfig(at: configPath) {
+                print("示例配置已创建于：\(configPath)")
+                print("请编辑配置文件，然后运行 'ntfy-macos serve' 启动服务。")
+            } else {
+                print("配置文件已存在，未做修改：\(configPath)")
+            }
         } catch {
-            print("Failed to create configuration: \(error)")
+            print("创建配置失败：\(error)")
             exit(1)
         }
     }
@@ -519,55 +618,55 @@ struct CLI {
 
     static func printUsage() {
         print("""
-        ntfy-macos - Native macOS CLI Notifier & Automation Agent
+        ntfy-macos - 原生 macOS 通知与自动化工具
 
-        USAGE:
-            ntfy-macos <COMMAND> [OPTIONS]
+        用法：
+            ntfy-macos <命令> [选项]
 
-        COMMANDS:
-            serve                    Start the notification service
-                --config <PATH>      Optional: Custom configuration file path
+        命令：
+            serve                    启动通知服务
+                --config <PATH>      可选：自定义配置文件路径
 
-            auth <subcommand>        Manage authentication tokens in Keychain
-                add <url> <token>    Store a token for a server
-                list                 List all servers with stored tokens
-                remove <url>         Remove a token for a server
+            auth <子命令>            管理钥匙串中的认证令牌
+                add <url> <token>    为服务器存储令牌
+                list                 列出所有已存令牌的服务器
+                remove <url>         删除某服务器的令牌
 
-            test-notify              Send a test notification
-                --topic <NAME>       Topic name to test
+            test-notify              发送测试通知
+                --topic <NAME>       要测试的主题名称
 
-            init                     Create a sample configuration file
-                --path <PATH>        Optional: Custom path for config file
+            init                     创建示例配置文件
+                --path <PATH>        可选：自定义配置文件路径
 
-            help                     Show this help message
+            help                     显示本帮助信息
 
-        EXAMPLES:
-            # Create configuration
+        示例：
+            # 创建配置
             ntfy-macos init
 
-            # Store authentication token in Keychain
+            # 将认证令牌存入钥匙串
             ntfy-macos auth add https://ntfy.sh tk_mytoken
 
-            # List stored tokens
+            # 列出已存储的令牌
             ntfy-macos auth list
 
-            # Remove a token
+            # 删除令牌
             ntfy-macos auth remove https://ntfy.sh
 
-            # Start the service
+            # 启动服务
             ntfy-macos serve
 
-            # Test notifications
+            # 测试通知
             ntfy-macos test-notify --topic alerts
 
-        CONFIGURATION:
-            Default config location: ~/.config/ntfy-macos/config.yml
+        配置：
+            默认配置位置：~/.config/ntfy-macos/config.yml
 
-            Tokens can be stored either:
-            - In the config file (token: field under each server)
-            - In the Keychain (using 'auth add' command) - more secure
+            令牌可存放于：
+            - 配置文件中（各服务器下的 token: 字段）
+            - 钥匙串中（使用 'auth add' 命令）——更安全
 
-        For more information, visit: https://github.com/laurentftech/ntfy-macos
+        更多信息请访问：https://github.com/laurentftech/ntfy-macos
         """)
     }
 }
@@ -580,6 +679,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         return false
+    }
+
+    /// Clicking the Dock icon with no visible window brings the history window back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if AppMode.isDockApp && !flag {
+            HistoryWindowController.shared.showHistory()
+        }
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -604,13 +711,15 @@ app.delegate = appDelegate
 // Schedule CLI execution after the run loop starts to ensure AppKit is fully initialized
 // This fixes the frozen window issue where events weren't being processed
 DispatchQueue.main.async {
+    // Regular app (Dock icon + windows) when launched by double-click or `open`,
+    // menu-bar-only background service when launched with a CLI subcommand.
+    AppMode.configure()
+
     let needsRunLoop = CLI.main()
     if !needsRunLoop {
         // Commands that don't need the run loop can exit immediately
         NSApp.terminate(nil)
     } else {
-        // For serve command: use accessory mode (menu bar only, no Dock icon)
-        app.setActivationPolicy(.accessory)
         StatusBarController.shared.setup()
         StatusBarController.shared.onReloadConfig = {
             CLI.ntfyAppInstance?.reloadConfig()

@@ -1,10 +1,10 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "ntfy-macos",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v26)
     ],
     products: [
         .executable(
@@ -19,12 +19,14 @@ let package = Package(
         .executableTarget(
             name: "ntfy-macos",
             dependencies: ["Yams"],
-            path: "Sources"
+            path: "Sources",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(
             name: "ntfy-macosTests",
             dependencies: ["ntfy-macos", "Yams"],
-            path: "Tests/ntfy-macosTests"
+            path: "Tests/ntfy-macosTests",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         )
     ]
 )

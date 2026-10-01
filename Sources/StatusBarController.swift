@@ -15,6 +15,7 @@ class StatusBarController: NSObject {
     private var connectingAnimationTimer: Timer?
     private var connectingAnimationVisible: Bool = true
     private var currentConfigError: String?
+    private var unreadCount: Int = 0
 
     enum ConnectionState {
         case connecting    // Never connected yet (orange, flashing)
@@ -65,7 +66,7 @@ class StatusBarController: NSObject {
         menu = NSMenu()
         menu?.autoenablesItems = false
 
-        statusMenuItem = NSMenuItem(title: "Connecting...", action: nil, keyEquivalent: "")
+        statusMenuItem = NSMenuItem(title: "连接中…", action: nil, keyEquivalent: "")
         statusMenuItem?.isEnabled = false
         menu?.addItem(statusMenuItem!)
 
@@ -76,43 +77,51 @@ class StatusBarController: NSObject {
         menu?.addItem(errorMenuItem!)
 
         // Servers submenu showing individual server statuses
-        let serversItem = NSMenuItem(title: "Servers", action: nil, keyEquivalent: "")
+        let serversItem = NSMenuItem(title: "服务器", action: nil, keyEquivalent: "")
         serversSubmenu = NSMenu()
         serversItem.submenu = serversSubmenu
         menu?.addItem(serversItem)
 
         menu?.addItem(NSMenuItem.separator())
 
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        // ⇧⌘H / ⇧⌘L keep ⌘H (隐藏应用) and ⌘L free for the app's main menu
+        let historyItem = NSMenuItem(title: "通知历史…", action: #selector(openHistory), keyEquivalent: "h")
+        historyItem.keyEquivalentModifierMask = [.command, .shift]
+        historyItem.target = self
+        historyItem.isEnabled = true
+        menu?.addItem(historyItem)
+
+        let settingsItem = NSMenuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         settingsItem.isEnabled = true
         menu?.addItem(settingsItem)
 
-        let showConfigItem = NSMenuItem(title: "Show Config in Finder", action: #selector(showConfigInFinder), keyEquivalent: "")
+        let showConfigItem = NSMenuItem(title: "在 Finder 中显示配置", action: #selector(showConfigInFinder), keyEquivalent: "")
         showConfigItem.target = self
         showConfigItem.isEnabled = true
         menu?.addItem(showConfigItem)
 
-        let reloadConfigItem = NSMenuItem(title: "Reload Config", action: #selector(reloadConfig), keyEquivalent: "r")
+        let reloadConfigItem = NSMenuItem(title: "重载配置", action: #selector(reloadConfig), keyEquivalent: "r")
         reloadConfigItem.target = self
         reloadConfigItem.isEnabled = true
         menu?.addItem(reloadConfigItem)
 
         menu?.addItem(NSMenuItem.separator())
 
-        let viewLogsItem = NSMenuItem(title: "View Logs...", action: #selector(viewLogs), keyEquivalent: "l")
+        let viewLogsItem = NSMenuItem(title: "查看日志…", action: #selector(viewLogs), keyEquivalent: "l")
+        viewLogsItem.keyEquivalentModifierMask = [.command, .shift]
         viewLogsItem.target = self
         viewLogsItem.isEnabled = true
         menu?.addItem(viewLogsItem)
 
         menu?.addItem(NSMenuItem.separator())
 
-        let aboutItem = NSMenuItem(title: "About ntfy-macos", action: #selector(showAbout), keyEquivalent: "")
+        let aboutItem = NSMenuItem(title: "关于 ntfy-macos", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         aboutItem.isEnabled = true
         menu?.addItem(aboutItem)
 
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.isEnabled = true
         menu?.addItem(quitItem)
 
@@ -121,6 +130,10 @@ class StatusBarController: NSObject {
 
     @objc func openSettings() {
         SettingsWindowController.shared.showSettings()
+    }
+
+    @objc func openHistory() {
+        HistoryWindowController.shared.showHistory()
     }
 
     @objc func showConfigInFinder() {
@@ -141,13 +154,12 @@ class StatusBarController: NSObject {
 
         // No logs found
         let alert = NSAlert()
-        alert.messageText = "Logs Not Found"
-        alert.informativeText = "No log files found yet. Logs will be created in \(Log.logDirectory)"
+        alert.messageText = "未找到日志"
+        alert.informativeText = "尚未生成日志文件。日志将写入 \(Log.logDirectory)"
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "好")
         alert.runModal()
-        // Re-apply accessory policy to prevent Dock icon from lingering
-        NSApp.setActivationPolicy(.accessory)
+        AppMode.demoteToAccessoryIfNeeded()
     }
 
     @objc func openServerURL(_ sender: NSMenuItem) {
@@ -170,7 +182,7 @@ class StatusBarController: NSObject {
             backing: .buffered,
             defer: false
         )
-        window.title = "About ntfy-macos"
+        window.title = "关于 ntfy-macos"
         window.center()
         window.isReleasedWhenClosed = false  // Keep window object alive after closing
 
@@ -183,7 +195,7 @@ class StatusBarController: NSObject {
         contentView.addSubview(titleLabel)
 
         // Version
-        let versionLabel = NSTextField(labelWithString: "Version \(AppConstants.effectiveVersion)")
+        let versionLabel = NSTextField(labelWithString: "版本 \(AppConstants.effectiveVersion)")
         versionLabel.font = NSFont.systemFont(ofSize: 12)
         versionLabel.textColor = .secondaryLabelColor
         versionLabel.frame = NSRect(x: 20, y: 135, width: 300, height: 18)
@@ -206,8 +218,8 @@ class StatusBarController: NSObject {
             .underlineStyle: NSUnderlineStyle.single.rawValue
         ]
 
-        attributedString.append(NSAttributedString(string: "Native macOS client for ntfy.sh\n\n", attributes: normalAttrs))
-        attributedString.append(NSAttributedString(string: "Created by ", attributes: normalAttrs))
+        attributedString.append(NSAttributedString(string: "ntfy.sh 的原生 macOS 客户端\n\n", attributes: normalAttrs))
+        attributedString.append(NSAttributedString(string: "作者：", attributes: normalAttrs))
 
         let authorLink = NSMutableAttributedString(string: "Laurent FRANCOISE", attributes: linkAttrs)
         authorLink.addAttribute(.link, value: "https://laurentftech.github.io", range: NSRange(location: 0, length: authorLink.length))
@@ -219,19 +231,19 @@ class StatusBarController: NSObject {
         githubLink.addAttribute(.link, value: "https://github.com/laurentftech/ntfy-macos", range: NSRange(location: 0, length: githubLink.length))
         attributedString.append(githubLink)
 
-        attributedString.append(NSAttributedString(string: "\n\nPowered by ", attributes: normalAttrs))
+        attributedString.append(NSAttributedString(string: "\n\n基于 ", attributes: normalAttrs))
 
         let ntfyLink = NSMutableAttributedString(string: "ntfy", attributes: linkAttrs)
         ntfyLink.addAttribute(.link, value: "https://ntfy.sh", range: NSRange(location: 0, length: ntfyLink.length))
         attributedString.append(ntfyLink)
 
-        attributedString.append(NSAttributedString(string: " by Philipp C. Heckel", attributes: normalAttrs))
+        attributedString.append(NSAttributedString(string: " 构建，作者 Philipp C. Heckel", attributes: normalAttrs))
 
         textView.textStorage?.setAttributedString(attributedString)
         contentView.addSubview(textView)
 
         // License
-        let licenseLabel = NSTextField(labelWithString: "Licensed under MIT")
+        let licenseLabel = NSTextField(labelWithString: "基于 MIT 许可证开源")
         licenseLabel.font = NSFont.systemFont(ofSize: 11)
         licenseLabel.textColor = .tertiaryLabelColor
         licenseLabel.frame = NSRect(x: 20, y: 15, width: 300, height: 16)
@@ -242,14 +254,14 @@ class StatusBarController: NSObject {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // Ensure we revert to accessory mode when the About window is closed
+        // Ensure a background service reverts to accessory mode when the About window closes
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
             queue: .main
         ) { _ in
             MainActor.assumeIsolated {
-                _ = NSApp.setActivationPolicy(.accessory)
+                AppMode.demoteToAccessoryIfNeeded()
             }
         }
     }
@@ -268,7 +280,7 @@ class StatusBarController: NSObject {
             .foregroundColor: NSColor.systemRed,
             .font: NSFont.systemFont(ofSize: 13)
         ]
-        let attributedTitle = NSAttributedString(string: "⚠️ Config Error", attributes: attributes)
+        let attributedTitle = NSAttributedString(string: "⚠️ 配置错误", attributes: attributes)
         errorMenuItem?.attributedTitle = attributedTitle
         errorMenuItem?.toolTip = error
     }
@@ -283,7 +295,7 @@ class StatusBarController: NSObject {
             .foregroundColor: NSColor.systemOrange,
             .font: NSFont.systemFont(ofSize: 13)
         ]
-        let attributedTitle = NSAttributedString(string: "⚠️ Config Warning", attributes: attributes)
+        let attributedTitle = NSAttributedString(string: "⚠️ 配置警告", attributes: attributes)
         errorMenuItem?.attributedTitle = attributedTitle
         errorMenuItem?.toolTip = warning
     }
@@ -375,6 +387,16 @@ class StatusBarController: NSObject {
             image.isTemplate = true
             statusItem?.button?.image = image
         }
+        // Show unread count next to the bell (from the history store)
+        statusItem?.button?.title = unreadCount > 0 ? " \(unreadCount)" : ""
+        statusItem?.length = NSStatusItem.variableLength
+    }
+
+    /// Updates the unread badge shown next to the menu bar icon.
+    func setUnreadCount(_ count: Int) {
+        guard count != unreadCount else { return }
+        unreadCount = count
+        refreshMainStatus()
     }
 
     private func refreshMainStatus() {
@@ -393,7 +415,7 @@ class StatusBarController: NSObject {
 
         if totalServers == 0 {
             statusMenuItem?.attributedTitle = NSAttributedString(
-                string: "No servers configured",
+                string: "未配置服务器",
                 attributes: textAttrs
             )
         } else if connectedServers == totalServers {
@@ -404,10 +426,8 @@ class StatusBarController: NSObject {
             ]
             attributedTitle.append(NSAttributedString(string: "● ", attributes: statusAttrs))
 
-            let topicText = totalTopics == 1 ? "topic" : "topics"
-            let serverText = totalServers == 1 ? "server" : "servers"
             attributedTitle.append(NSAttributedString(
-                string: "\(totalTopics) \(topicText) on \(totalServers) \(serverText)",
+                string: "\(totalServers) 台服务器 · \(totalTopics) 个主题",
                 attributes: textAttrs
             ))
             statusMenuItem?.attributedTitle = attributedTitle
@@ -418,7 +438,7 @@ class StatusBarController: NSObject {
                 .font: NSFont.systemFont(ofSize: 13)
             ]
             attributedTitle.append(NSAttributedString(string: "● ", attributes: statusAttrs))
-            attributedTitle.append(NSAttributedString(string: "Connecting...", attributes: textAttrs))
+            attributedTitle.append(NSAttributedString(string: "连接中…", attributes: textAttrs))
             statusMenuItem?.attributedTitle = attributedTitle
         } else if disconnectedServers > 0 {
             // Some servers disconnected (red indicator)
@@ -428,7 +448,7 @@ class StatusBarController: NSObject {
             ]
             attributedTitle.append(NSAttributedString(string: "● ", attributes: statusAttrs))
             attributedTitle.append(NSAttributedString(
-                string: "\(connectedServers)/\(totalServers) servers connected",
+                string: "已连接 \(connectedServers)/\(totalServers) 台服务器",
                 attributes: textAttrs
             ))
             statusMenuItem?.attributedTitle = attributedTitle
@@ -440,7 +460,7 @@ class StatusBarController: NSObject {
             ]
             attributedTitle.append(NSAttributedString(string: "● ", attributes: statusAttrs))
             attributedTitle.append(NSAttributedString(
-                string: "\(connectedServers)/\(totalServers) servers connected",
+                string: "已连接 \(connectedServers)/\(totalServers) 台服务器",
                 attributes: textAttrs
             ))
             statusMenuItem?.attributedTitle = attributedTitle
@@ -451,7 +471,7 @@ class StatusBarController: NSObject {
         serversSubmenu?.removeAllItems()
 
         if serverStatuses.isEmpty {
-            let noServersItem = NSMenuItem(title: "No servers configured", action: nil, keyEquivalent: "")
+            let noServersItem = NSMenuItem(title: "未配置服务器", action: nil, keyEquivalent: "")
             noServersItem.isEnabled = false
             serversSubmenu?.addItem(noServersItem)
             return
@@ -502,11 +522,11 @@ class StatusBarController: NSObject {
             // Add tooltip with topics and state
             let stateText: String
             switch status.state {
-            case .connected: stateText = "Connected"
-            case .disconnected: stateText = "Disconnected"
-            case .connecting: stateText = "Connecting..."
+            case .connected: stateText = "已连接"
+            case .disconnected: stateText = "已断开"
+            case .connecting: stateText = "连接中…"
             }
-            serverItem.toolTip = "\(stateText)\nTopics: \(topicsText)"
+            serverItem.toolTip = "\(stateText)\n主题：\(topicsText)"
 
             serversSubmenu?.addItem(serverItem)
 

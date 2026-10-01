@@ -131,19 +131,19 @@ class SettingsViewModel: ObservableObject {
         // Validation
         for server in servers {
             if server.url.trimmingCharacters(in: .whitespaces).isEmpty {
-                saveError = "Server URL cannot be empty"
+                saveError = "服务器地址不能为空"
                 return
             }
             for topic in server.topics {
                 if topic.name.trimmingCharacters(in: .whitespaces).isEmpty {
-                    saveError = "Topic name cannot be empty"
+                    saveError = "主题名称不能为空"
                     return
                 }
             }
             // Check for duplicate topic names within a server
             let topicNames = server.topics.map { $0.name }
             if Set(topicNames).count != topicNames.count {
-                saveError = "Duplicate topic names in server \(server.url)"
+                saveError = "服务器 \(server.url) 中存在重复的主题名称"
                 return
             }
         }
@@ -155,7 +155,7 @@ class SettingsViewModel: ObservableObject {
         } else if let p = UInt16(localServerPort) {
             port = p
         } else {
-            saveError = "Invalid port number"
+            saveError = "端口号无效"
             return
         }
 
@@ -220,7 +220,7 @@ class SettingsViewModel: ObservableObject {
             hasUnsavedChanges = false
             isLocked = true
         } catch {
-            saveError = "Failed to save: \(error.localizedDescription)"
+            saveError = "保存失败：\(error.localizedDescription)"
         }
     }
 

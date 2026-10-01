@@ -1,20 +1,20 @@
-# ntfy-macos Configuration Examples
-# Copy relevant sections to ~/.config/ntfy-macos/config.yml
+# ntfy-macos 配置示例
+# 将相关片段复制到 ~/.config/ntfy-macos/config.yml
 #
-# Note: Unknown keys in your config will trigger a warning in the menu bar.
-# This helps catch typos like "icon_path" vs "iconpath" or misplaced options.
+# 注意：配置中的未知键会在菜单栏触发警告。
+# 这有助于发现诸如 "icon_path" 误写成 "iconpath"、或选项放错位置之类的拼写错误。
 
-# Enable local notification server on localhost (optional)
-# Scripts can POST to http://127.0.0.1:9292/notify to trigger notifications
+# 在 localhost 上启用本地通知服务器（可选）
+# 脚本可向 http://127.0.0.1:9292/notify 发送 POST 请求来触发通知
 # local_server_port: 9292
 
 servers:
   # ===========================================
-  # Home Automation (Home Assistant)
+  # 智能家居（Home Assistant）
   # ===========================================
   - url: https://ntfy.sh
-    # Security: only allow homeassistant:// and https URLs
-    # Note: allowed_schemes REPLACES defaults - http is blocked here
+    # 安全策略：仅允许 homeassistant:// 和 https 链接
+    # 注意：allowed_schemes 会替换默认值——此处 http 被禁止
     allowed_schemes:
       - https
       - homeassistant
@@ -22,40 +22,40 @@ servers:
       - name: homeassistant-alerts
         icon_path: /Users/you/icons/homeassistant.png
         actions:
-          - title: "Open Home Assistant"
+          - title: "打开 Home Assistant"
             type: view
             url: "homeassistant://"
-          - title: "View Cameras"
+          - title: "查看摄像头"
             type: view
             url: "homeassistant://navigate/lovelace/cameras"
 
   # ===========================================
-  # CI/CD Pipeline Notifications
+  # CI/CD 流水线通知
   # ===========================================
-  # IMPORTANT: Use a private server with authentication for script actions
-  # Never use auto_run_script or script actions with public ntfy.sh
+  # 重要：脚本类动作务必配合带认证的私有服务器使用
+  # 切勿在公共 ntfy.sh 上使用 auto_run_script 或 script 动作
   - url: https://ntfy.yourcompany.com
     token: tk_cicd_token
     topics:
       - name: github-actions
         icon_symbol: hammer.fill
         actions:
-          - title: "Open GitHub"
+          - title: "打开 GitHub"
             type: view
             url: "https://github.com/youruser/yourrepo/actions"
-          - title: "Deploy"
+          - title: "部署"
             type: script
             path: /usr/local/bin/deploy.sh
 
       - name: gitlab-ci
         icon_symbol: arrow.triangle.branch
         actions:
-          - title: "Open Pipeline"
+          - title: "打开流水线"
             type: view
             url: "https://gitlab.com/yourgroup/yourproject/-/pipelines"
 
   # ===========================================
-  # Server Monitoring
+  # 服务器监控
   # ===========================================
   - url: https://ntfy.myserver.com
     token: tk_yourtoken
@@ -63,10 +63,10 @@ servers:
       - name: server-alerts
         icon_symbol: server.rack
         actions:
-          - title: "SSH to Server"
+          - title: "SSH 连接服务器"
             type: script
             path: /usr/local/bin/open-ssh.sh
-          - title: "View Grafana"
+          - title: "查看 Grafana"
             type: view
             url: "https://grafana.myserver.com"
 
@@ -74,19 +74,19 @@ servers:
         icon_symbol: externaldrive.fill
         auto_run_script: /usr/local/bin/disk-cleanup.sh
         actions:
-          - title: "View Dashboard"
+          - title: "查看仪表盘"
             type: view
             url: "https://grafana.myserver.com/d/disk"
 
   # ===========================================
-  # NAS / Synology
+  # NAS / 群晖（Synology）
   # ===========================================
   - url: https://ntfy.sh
     topics:
       - name: synology
         icon_path: /Users/you/icons/synology.png
         actions:
-          - title: "Open DSM"
+          - title: "打开 DSM"
             type: view
             url: "https://nas.local:5001"
           - title: "Download Station"
@@ -94,7 +94,7 @@ servers:
             url: "https://nas.local:5001/webman/index.cgi?launchApp=SYNO.SDS.DownloadStation.Application"
 
   # ===========================================
-  # Package Updates (view only - safe for public server)
+  # 软件包更新（仅 view 动作——公共服务器安全可用）
   # ===========================================
   - url: https://ntfy.sh
     topics:
@@ -105,12 +105,12 @@ servers:
       - name: homebrew-updates
         icon_symbol: mug.fill
         actions:
-          - title: "View Changelog"
+          - title: "查看更新日志"
             type: view
             url: "https://github.com/Homebrew/brew/releases"
 
   # ===========================================
-  # Package Updates (with auto-update scripts - private server)
+  # 软件包更新（带自动更新脚本——私有服务器）
   # ===========================================
   - url: https://ntfy.home.local
     token: tk_updates_token
@@ -124,7 +124,7 @@ servers:
         auto_run_script: /usr/local/bin/brew-upgrade.sh
 
   # ===========================================
-  # Security Alerts (private server required for scripts)
+  # 安全告警（脚本动作必须使用私有服务器）
   # ===========================================
   - url: https://ntfy.secure.local
     token: tk_security_token
@@ -132,15 +132,15 @@ servers:
       - name: security-alerts
         icon_symbol: lock.shield.fill
         actions:
-          - title: "View Logs"
+          - title: "查看日志"
             type: script
             path: /usr/local/bin/view-security-logs.sh
-          - title: "Block IP"
+          - title: "封禁 IP"
             type: script
             path: /usr/local/bin/block-ip.sh
 
   # ===========================================
-  # Background Processing (Silent) - private server required
+  # 后台处理（静默）——需使用私有服务器
   # ===========================================
   - url: https://ntfy.home.local
     token: tk_automation_token
@@ -154,7 +154,7 @@ servers:
         auto_run_script: /usr/local/bin/sync-files.sh
 
   # ===========================================
-  # Smart Home Devices (private server for script actions)
+  # 智能家居设备（脚本动作需使用私有服务器）
   # ===========================================
   - url: https://ntfy.home.local
     token: tk_smarthome_token
@@ -162,22 +162,22 @@ servers:
       - name: doorbell
         icon_symbol: video.doorbell.fill
         actions:
-          - title: "View Camera"
+          - title: "查看摄像头"
             type: view
             url: "https://cameras.home.local/doorbell"
-          - title: "Unlock Door"
+          - title: "开锁"
             type: script
             path: /usr/local/bin/unlock-door.sh
 
       - name: garage
         icon_symbol: car.fill
         actions:
-          - title: "Open Garage"
+          - title: "打开车库门"
             type: script
             path: /usr/local/bin/garage-toggle.sh
 
   # ===========================================
-  # Development Tools (private server for script actions)
+  # 开发工具（脚本动作需使用私有服务器）
   # ===========================================
   - url: https://ntfy.dev.local
     token: tk_dev_token
@@ -185,22 +185,22 @@ servers:
       - name: build-complete
         icon_symbol: checkmark.circle.fill
         actions:
-          - title: "Open Xcode"
+          - title: "打开 Xcode"
             type: view
             url: "xcode://"
-          - title: "Run Tests"
+          - title: "运行测试"
             type: script
             path: /usr/local/bin/run-tests.sh
 
       - name: pr-review
         icon_symbol: arrow.triangle.pull
         actions:
-          - title: "Open PR"
+          - title: "打开 PR"
             type: view
             url: "https://github.com/pulls"
 
   # ===========================================
-  # macOS Shortcuts Integration
+  # macOS 快捷指令集成
   # ===========================================
   - url: https://ntfy.home.local
     token: tk_shortcuts_token
@@ -208,15 +208,15 @@ servers:
       - name: automation
         icon_symbol: wand.and.stars
         actions:
-          - title: "Run Shortcut"
+          - title: "运行快捷指令"
             type: shortcut
             name: "My Automation Shortcut"
-          - title: "Focus Mode"
+          - title: "专注模式"
             type: shortcut
             name: "Toggle Focus Mode"
 
   # ===========================================
-  # AppleScript Actions
+  # AppleScript 动作
   # ===========================================
   - url: https://ntfy.home.local
     token: tk_applescript_token
@@ -224,50 +224,50 @@ servers:
       - name: media-control
         icon_symbol: play.circle.fill
         actions:
-          # Inline AppleScript
-          - title: "Pause Music"
+          # 内联 AppleScript
+          - title: "暂停音乐"
             type: applescript
             script: 'tell application "Music" to pause'
-          # AppleScript file
-          - title: "Run Workflow"
+          # AppleScript 文件
+          - title: "运行工作流"
             type: applescript
             path: /Users/you/Scripts/workflow.scpt
 
   # ===========================================
-  # Fetch Missed Messages
+  # 拉取离线期间错过的消息
   # ===========================================
-  # Fetch messages that arrived while the app was not running
+  # 拉取应用未运行期间到达的消息
   - url: https://ntfy.myserver.com
     token: tk_yourtoken
-    fetch_missed: true  # Enable for all topics on this server
+    fetch_missed: true  # 对该服务器上所有主题启用
     topics:
       - name: important-alerts
         icon_symbol: exclamationmark.triangle.fill
       - name: low-priority
-        fetch_missed: false  # Override: disable for this topic
+        fetch_missed: false  # 覆盖：对该主题禁用
 
   # ===========================================
-  # URL Security (allowed_schemes & allowed_domains)
+  # 链接安全（allowed_schemes 与 allowed_domains）
   # ===========================================
-  # Restrict which URLs can be opened from notifications
+  # 限制通知中可以打开哪些链接
   - url: https://ntfy.sh
-    # Only allow https URLs to specific domains
+    # 仅允许指向特定域名的 https 链接
     allowed_schemes:
       - https
     allowed_domains:
       - github.com
-      - "*.example.com"  # Wildcards supported
+      - "*.example.com"  # 支持通配符
     topics:
       - name: restricted-alerts
         icon_symbol: lock.fill
         click_url: "https://github.com/myorg/myrepo"
 
-  # Allow custom app schemes (e.g., Home Assistant)
+  # 允许自定义 app scheme（如 Home Assistant）
   - url: https://ntfy.home.local
     allowed_schemes:
       - https
       - homeassistant
-      - ssh  # Allow ssh:// URLs
+      - ssh  # 允许 ssh:// 链接
     topics:
       - name: home-automation
         icon_symbol: house.fill

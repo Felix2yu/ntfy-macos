@@ -48,11 +48,13 @@ final class MockNtfyDelegate: NtfyClientDelegate {
     var onDisconnect: (() -> Void)?
     var onError: ((Error) -> Void)?
     var onMessage: ((NtfyMessage) -> Void)?
+    var onActionEvent: ((NtfyMessage) -> Void)?
 
     func ntfyClientDidConnect(_ client: NtfyClient) { onConnect?() }
     func ntfyClientDidDisconnect(_ client: NtfyClient) { onDisconnect?() }
     func ntfyClient(_ client: NtfyClient, didEncounterError error: Error) { onError?(error) }
     func ntfyClient(_ client: NtfyClient, didReceiveMessage message: NtfyMessage) { onMessage?(message) }
+    func ntfyClient(_ client: NtfyClient, didReceiveActionEvent event: NtfyMessage) { onActionEvent?(event) }
 }
 
 // MARK: - Helper

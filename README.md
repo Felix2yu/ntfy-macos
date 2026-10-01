@@ -8,82 +8,83 @@
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-brown.svg)](https://github.com/laurentftech/homebrew-ntfy-macos)
 [![Tests](https://img.shields.io/badge/Tests-177-brightgreen.svg)]()
 
-Receive push notifications on your Mac from any source — servers, IoT devices, home automation, CI pipelines, or custom scripts. No account required, works with the public [ntfy.sh](https://ntfy.sh) service or your own self-hosted server.
+在 Mac 上接收来自任何来源的推送通知——服务器、IoT 设备、智能家居、CI 流水线或自定义脚本。无需注册账号，既可使用公共 [ntfy.sh](https://ntfy.sh) 服务，也支持自建服务器。
 
-**ntfy-macos** is a native macOS client that subscribes to ntfy topics and delivers rich notifications with SF Symbols, images, and interactive buttons. Trigger shell scripts automatically when messages arrive.
+**ntfy-macos** 是一款原生 macOS 客户端，可订阅 ntfy 主题（topic），并推送带有 SF Symbols 图标、图片和交互按钮的富通知。收到消息时还能自动触发 shell 脚本。
 
-<img src="docs/ntfy-macos-snapshot.png" width="400" alt="ntfy-macos notification example">
+<img src="docs/ntfy-macos-snapshot.png" width="400" alt="ntfy-macos 通知示例">
 
-## Features
+## 功能特性
 
-- **Native macOS Notifications**: Rich notifications with SF Symbols and local images
-- **Multi-Server Support**: Connect to multiple ntfy servers simultaneously
-- **Emoji Tags**: Automatic conversion of ntfy tags to emojis in notification titles
-- **Interactive Actions**: Add custom buttons to notifications that execute scripts or open URLs
-- **Automatic Script Execution**: Run shell scripts automatically when messages arrive
-- **Silent Notifications**: Receive messages without displaying notification banners
-- **Secure Authentication**: Store tokens securely in macOS Keychain
-- **Robust Reconnection**: Handles network interruptions and sleep/wake gracefully
-- **Priority Mapping**: Maps ntfy priority levels to macOS interruption levels (critical, time-sensitive)
-- **Menu Bar App**: Runs in the menu bar with quick access to config and reload
-- **Live Config Reload**: Configuration changes are detected and applied automatically
-- **Config Validation**: Warns about unknown keys and typos in the menu bar
-- **Click to Open**: Click notifications to open in browser (configurable per topic)
-- **Automatic Permission Request**: Prompts for notification permission on first launch
-- **Local Notification Server**: Built-in HTTP server on localhost for scripts to trigger notifications
-- **Settings Window**: Native SwiftUI interface for server and topic configuration with real-time connection status
+- **原生 macOS 通知**：支持 SF Symbols 图标与本地图片的富通知
+- **多服务器支持**：同时连接多个 ntfy 服务器
+- **Emoji 标签**：自动将 ntfy 标签转换为 emoji 并加入通知标题
+- **交互按钮**：为通知添加自定义按钮，点击可执行脚本或打开链接
+- **自动执行脚本**：收到消息时自动运行 shell 脚本
+- **静默通知**：接收消息但不弹出通知横幅
+- **安全认证**：令牌安全存储于 macOS 钥匙串（Keychain）
+- **稳健的重连机制**：从容应对网络中断与睡眠/唤醒
+- **优先级映射**：将 ntfy 优先级映射到 macOS 中断级别（紧急、时效性）
+- **双运行形态**：双击 / `open` 打开是带 Dock 图标的主窗口应用，`serve` 启动则作为纯后台菜单栏服务
+- **配置热重载**：自动检测并应用配置变更
+- **配置校验**：在菜单栏提示未知配置项和拼写错误
+- **点击打开**：点击通知在浏览器中打开链接（可按主题配置）
+- **已读 / 删除跨设备同步**：历史窗口中的已读、删除操作会同步到服务端，其他设备的同类操作也会回写本地状态并撤销已弹出的通知横幅
+- **自动请求权限**：首次启动时自动请求通知权限
+- **本地通知服务器**：内建 HTTP 服务器（仅限 localhost），供脚本直接触发通知
+- **设置窗口**：原生 SwiftUI 界面，配置服务器与主题，实时显示连接状态
 
-## Installation
+## 安装
 
-### Using Homebrew
+### 使用 Homebrew
 
 ```bash
-# Add the tap
+# 添加 tap 源
 brew tap laurentftech/ntfy-macos
 
-# Install
+# 安装
 brew install ntfy-macos
 ```
 
-### Build from Source
+### 从源码构建
 
 ```bash
-# Clone the repository
+# 克隆仓库
 git clone https://github.com/laurentftech/ntfy-macos.git
 cd ntfy-macos
 
-# Build the app bundle
+# 构建 app bundle
 ./build-app.sh
 
-# Install
+# 安装
 sudo cp -r .build/release/ntfy-macos.app /Applications/
 ```
 
-### Updating
+### 更新
 
 ```bash
-# Update via Homebrew
+# 通过 Homebrew 更新
 brew update && brew upgrade ntfy-macos
 
-# Restart the service to apply the update
+# 重启服务以应用更新
 brew services restart ntfy-macos
 ```
 
-**Note**: Homebrew installation requires Xcode (not just Command Line Tools) because the app is built from source.
+**注意**：通过 Homebrew 安装需要完整版 Xcode（仅 Command Line Tools 不够），因为应用是从源码构建的。
 
-## Quick Start
+## 快速开始
 
-1. **Initialize Configuration**
+1. **初始化配置**
 
 ```bash
 ntfy-macos init
 ```
 
-This creates a sample configuration at `~/.config/ntfy-macos/config.yml`.
+这会在 `~/.config/ntfy-macos/config.yml` 创建一份示例配置。
 
-2. **Edit Configuration**
+2. **编辑配置**
 
-Edit the configuration file to add your servers and topics:
+编辑配置文件，添加你的服务器和主题：
 
 ```yaml
 servers:
@@ -100,46 +101,57 @@ servers:
         auto_run_script: ~/scripts/deploy-handler.sh
 ```
 
-3. **(Optional) Store Authentication Token in Keychain**
+3. **（可选）将认证令牌存入钥匙串**
 
 ```bash
 ntfy-macos auth add https://ntfy.sh tk_yourtoken
 ```
 
-4. **Start the Service**
+4. **启动服务**
 
 ```bash
-# Using Homebrew services (recommended - auto-restarts on crash)
+# 使用 Homebrew services（推荐——崩溃后自动重启）
 brew services start ntfy-macos
 
-# Or run directly
+# 或直接运行
 ntfy-macos serve
 ```
 
-On first launch, the app will automatically request notification permission.
+首次启动时，应用会自动请求通知权限。
 
-The app runs in the menu bar with options to:
-- **Server Status**: Shows connection state for each server (green=connected, red=disconnected, orange flashing=connecting)
-- **Settings**: Open the Settings window to configure servers, topics, and local server (⌘,)
-- **Show Config in Finder**: Reveal config directory
-- **Reload Config**: Apply configuration changes (⌘R)
-- **View Logs**: Open log files (with automatic rotation) (⌘L)
-- **About**: Credits and links
-- **Quit**: Stop the service
+两种运行形态共用同一份配置，启动后常驻菜单栏：
 
-5. **(Optional) Add to Launchpad**
+**图形界面（双击图标或 `open ntfy-macos.app`，未带任何参数）**
+- 带 Dock 图标的标准应用，打开即显示 **通知历史** 主窗口
+- 关闭主窗口不会退出应用，通知服务继续在后台运行；点击 Dock 图标可重新打开主窗口
+- 屏幕顶部为完整的应用菜单：`ntfy-macos`（关于 / 设置 ⌘, / 隐藏 / 退出）、`文件`（通知历史 ⇧⌘H、重载配置 ⌘R、在 Finder 中显示配置、查看日志 ⇧⌘L、关闭 ⌘W）、`编辑`、`窗口`、`帮助`
+
+**后台服务（`ntfy-macos serve`，含 `brew services` / launchd 拉起）**
+- 不显示 Dock 图标，也不打开任何窗口
+
+菜单栏功能：
+- **服务器状态**：显示每个服务器的连接状态（绿色=已连接，红色=已断开，橙色闪烁=连接中）
+- **设置**：打开设置窗口，配置服务器、主题和本地服务器（⌘,）
+- **通知历史**：打开通知历史窗口（⇧⌘H）
+- **在 Finder 中显示配置**：打开配置文件所在目录
+- **重载配置**：应用配置变更（⌘R）
+- **查看日志**：打开日志文件（自动轮转）（⌘L）
+- **关于**：制作团队与相关链接
+- **退出**：停止服务
+
+5. **（可选）添加到启动台**
 
 ```bash
 sudo ln -sf /usr/local/opt/ntfy-macos/ntfy-macos.app /Applications/
 ```
 
-## Configuration
+## 配置
 
-The configuration file is located at `~/.config/ntfy-macos/config.yml`.
+配置文件位于 `~/.config/ntfy-macos/config.yml`。
 
-For a complete list of all configuration options and detailed examples, please see the [config-examples.yml](examples/config-examples.yml) file.
+完整的配置项列表和详细示例请参阅 [config-examples.yml](examples/config-examples.yml) 文件。
 
-### Basic Structure
+### 基本结构
 
 ```yaml
 servers:
@@ -160,59 +172,59 @@ servers:
         auto_run_script: ~/scripts/deploy-handler.sh
 ```
 
-### Configuration Options
+### 配置项说明
 
-#### Global Fields
+#### 全局字段
 
-- `local_server_port` (optional): Port for the local notification HTTP server (e.g., `9292`). Disabled if omitted.
+- `local_server_port`（可选）：本地通知 HTTP 服务器的端口（例如 `9292`）。省略则禁用。
 
-#### Server Fields
+#### 服务器字段
 
-- `url` (required): Server URL
-- `token` (optional): Authentication token
-- `topics` (required): List of topics
+- `url`（必填）：服务器地址
+- `token`（可选）：认证令牌
+- `topics`（必填）：主题列表
 
-#### Topic Fields
+#### 主题字段
 
-- `name` (required): Topic name
-- `icon_symbol` (optional): SF Symbol name
-- `icon_path` (optional): Path to a local image file
-- `auto_run_script` (optional): Script to execute on every message
-- `silent` (optional): If `true`, skip notification banner
-- `click_url` (optional): Custom URL to open on click
-- `actions` (optional): List of interactive buttons
+- `name`（必填）：主题名称
+- `icon_symbol`（可选）：SF Symbol 图标名称
+- `icon_path`（可选）：本地图片文件路径
+- `auto_run_script`（可选）：每条消息到达时自动执行的脚本
+- `silent`（可选）：设为 `true` 则不弹出通知横幅
+- `click_url`（可选）：点击通知时打开的自定义链接
+- `actions`（可选）：交互按钮列表
 
-#### Action Fields
+#### 动作（Action）字段
 
-- `title` (required): Button label
-- `type` (required): `script`, `view`, `shortcut`, or `applescript`
-- `path` (for `script` and `applescript` file): Absolute path to the script file
-- `url` (for `view`): URL to open
-- `name` (for `shortcut`): macOS Shortcut name
-- `script` (for `applescript` inline): AppleScript source code
+- `title`（必填）：按钮文字
+- `type`（必填）：`script`、`view`、`shortcut` 或 `applescript`
+- `path`（`script` 和 `applescript` 文件用）：脚本文件的绝对路径
+- `url`（`view` 用）：要打开的链接
+- `name`（`shortcut` 用）：macOS 快捷指令名称
+- `script`（`applescript` 内联用）：AppleScript 源代码
 
-**Note**: Config-defined actions ALWAYS override any actions sent with the ntfy message.
+**注意**：配置文件中定义的动作**始终覆盖**消息自带的动作。
 
-Here’s a summary of how actions are handled:
+各类动作的处理方式汇总：
 
-| Action type | ntfy protocol | ntfy-macos (payload)    | ntfy-macos (config.yml)     |
-| ----------- | ------------- | ----------------------- | --------------------------- |
-| view        | ✅ Standard    | ✅ Supported             | ✅ Supported                 |
-| http        | ✅ Standard    | ✅ Supported             | ❌ Not supported (by design) |
-| broadcast   | ✅ Standard    | ❌ Ignored (Android-only)| ❌ Not applicable            |
-| script      | ❌             | ❌ Blocked               | ✅ Supported                 |
-| applescript | ❌             | ❌ Blocked               | ✅ Supported                 |
-| shortcut    | ❌             | ❌ Blocked               | ✅ Supported                 |
+| 动作类型    | ntfy 协议 | ntfy-macos（消息负载）     | ntfy-macos（config.yml）    |
+| ----------- | --------- | -------------------------- | --------------------------- |
+| view        | ✅ 标准    | ✅ 支持                     | ✅ 支持                      |
+| http        | ✅ 标准    | ✅ 支持                     | ❌ 不支持（有意为之）        |
+| broadcast   | ✅ 标准    | ❌ 忽略（仅 Android）       | ❌ 不适用                    |
+| script      | ❌         | ❌ 禁止                     | ✅ 支持                      |
+| applescript | ❌         | ❌ 禁止                     | ✅ 支持                      |
+| shortcut    | ❌         | ❌ 禁止                     | ✅ 支持                      |
 
-> `script`, `applescript`, and `shortcut` actions are **only available via config.yml** — they cannot be triggered from message payloads. This prevents remote code execution.
+> `script`、`applescript` 和 `shortcut` 动作**只能通过 config.yml 配置**——无法通过消息负载触发。这样可防止远程代码执行。
 
-**Note:** `applescript` and `shortcut` are **ntfy-macos client-specific action types**. Only `view`, `http`, `broadcast`, and `dismiss` are part of the official ntfy protocol.
+**注意**：`applescript` 和 `shortcut` 是 **ntfy-macos 客户端特有的动作类型**。官方 ntfy 协议仅包含 `view`、`http`、`broadcast` 和 `dismiss`。
 
-## CLI Commands
+## CLI 命令
 
 ### serve
 
-Start the notification service:
+启动通知服务：
 
 ```bash
 ntfy-macos serve
@@ -220,24 +232,24 @@ ntfy-macos serve
 
 ### auth
 
-Manage authentication tokens in Keychain:
+管理钥匙串中的认证令牌：
 
 ```bash
-# Add a token
+# 添加令牌
 ntfy-macos auth add <server-url> <token>
 
-# List all stored tokens
+# 列出所有已存储的令牌
 ntfy-macos auth list
 
-# Remove a token
+# 删除令牌
 ntfy-macos auth remove <server-url>
 ```
 
-Keychain tokens take priority over tokens in the YAML configuration.
+钥匙串中的令牌优先于 YAML 配置文件中的令牌。
 
 ### test-notify
 
-Send a test notification (and request permissions):
+发送一条测试通知（并请求权限）：
 
 ```bash
 ntfy-macos test-notify --topic <NAME>
@@ -245,7 +257,7 @@ ntfy-macos test-notify --topic <NAME>
 
 ### init
 
-Create a sample configuration file:
+创建示例配置文件：
 
 ```bash
 ntfy-macos init
@@ -253,87 +265,88 @@ ntfy-macos init
 
 ### help
 
-Display help information:
+显示帮助信息：
 
 ```bash
 ntfy-macos help
 ```
 
-## Script Execution
+## 脚本执行
 
-Scripts receive the message body as the first argument (`$1`) and full message context as environment variables:
+脚本通过第一个参数（`$1`）接收消息正文，并通过环境变量接收完整的消息上下文：
 
 ```bash
 #!/bin/bash
 MESSAGE="$1"
 
-# Environment variables available:
-# NTFY_ID       - Unique message ID
-# NTFY_TOPIC    - Topic name
-# NTFY_TIME     - Unix timestamp
-# NTFY_EVENT    - Event type (always "message")
-# NTFY_TITLE    - Message title (if set)
-# NTFY_MESSAGE  - Message body (if set)
-# NTFY_PRIORITY - Priority level 1-5 (if set)
-# NTFY_TAGS     - Comma-separated tags (if set)
-# NTFY_CLICK    - Click URL (if set)
+# 可用的环境变量：
+# NTFY_ID       - 消息唯一 ID
+# NTFY_TOPIC    - 主题名称
+# NTFY_TIME     - Unix 时间戳
+# NTFY_EVENT    - 事件类型（恒为 "message"）
+# NTFY_TITLE    - 消息标题（如有）
+# NTFY_MESSAGE  - 消息正文（如有）
+# NTFY_PRIORITY - 优先级 1-5（如有）
+# NTFY_TAGS     - 逗号分隔的标签（如有）
+# NTFY_CLICK    - 点击链接（如有）
 
 echo "[$NTFY_TOPIC] $NTFY_TITLE: $MESSAGE"
-# Your automation logic here
+# 你的自动化逻辑写在这里
 ```
 
-### Environment
+### 运行环境
 
-Scripts are executed with an enhanced PATH:
+脚本执行时使用增强的 PATH：
+
 ```
 /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 ```
 
-This ensures Homebrew-installed tools are available.
+确保 Homebrew 安装的工具可直接调用。
 
-### Make Scripts Executable
+### 赋予脚本执行权限
 
 ```bash
 chmod +x /path/to/your/script.sh
 ```
 
-### Security Considerations
+### 安全须知
 
-Scripts are **only executed if explicitly configured** in your local `config.yml` file. ntfy-macos will never execute arbitrary code from incoming messages.
+脚本**只在本地 `config.yml` 中明确配置后才会执行**。ntfy-macos 绝不会执行来自消息内容的任意代码。
 
-**Best practices:**
-- Only configure scripts that you trust and have reviewed
-- Use absolute paths to scripts
-- For public topics, avoid `auto_run_script`
-- Keep your configuration file secure (`chmod 600 ~/.config/ntfy-macos/config.yml`)
-- For sensitive automation, use a self-hosted ntfy server with authentication
-- Use `allowed_schemes` and `allowed_domains` to restrict which URLs can be opened.
+**最佳实践：**
+- 只配置你信任且审查过的脚本
+- 脚本使用绝对路径
+- 公共主题避免使用 `auto_run_script`
+- 妥善保管配置文件（`chmod 600 ~/.config/ntfy-macos/config.yml`）
+- 涉及敏感自动化时，使用带认证的自建 ntfy 服务器
+- 使用 `allowed_schemes` 和 `allowed_domains` 限制可打开的链接范围。
 
-## Local Notification Server
+## 本地通知服务器
 
-ntfy-macos can run a local HTTP server on localhost that allows scripts and local tools to trigger macOS notifications directly, without going through an external ntfy server.
+ntfy-macos 可以在 localhost 上运行一个本地 HTTP 服务器，让脚本和本地工具直接触发 macOS 通知，无需经过外部 ntfy 服务器。
 
 ```mermaid
 flowchart LR
     subgraph External
-        ntfy["🌐 ntfy server"]
+        ntfy["🌐 ntfy 服务器"]
         cron["⏰ cron / launchd"]
-        ci["🔧 CI pipeline"]
+        ci["🔧 CI 流水线"]
     end
 
     subgraph ntfy-macos
-        client["📡 ntfy client"]
+        client["📡 ntfy 客户端"]
         script["📜 auto_run_script"]
-        local["🖥️ Local HTTP server
+        local["🖥️ 本地 HTTP 服务器
         127.0.0.1:9292"]
-        notif["🔔 macOS notification"]
+        notif["🔔 macOS 通知"]
     end
 
-    ntfy -- "push messages" --> client
-    client -- "show notification" --> notif
-    client -- "run script + NTFY_* env" --> script
+    ntfy -- "推送消息" --> client
+    client -- "显示通知" --> notif
+    client -- "执行脚本 + NTFY_* 环境变量" --> script
     script -- "POST /notify" --> local
-    local -- "follow-up" --> notif
+    local -- "后续通知" --> notif
 
     cron -- "POST /notify" --> local
     ci -- "POST /notify" --> local
@@ -347,9 +360,9 @@ flowchart LR
     style notif fill:#e83e8c,stroke:#c21c6b,color:#fff
 ```
 
-### Setup
+### 配置方法
 
-Add `local_server_port` to the root of your `config.yml`:
+在 `config.yml` 根级别添加 `local_server_port`：
 
 ```yaml
 local_server_port: 9292
@@ -360,9 +373,9 @@ servers:
       - name: alerts
 ```
 
-### Usage
+### 使用方法
 
-Send a POST request to trigger a notification:
+发送 POST 请求即可触发通知：
 
 ```bash
 curl -X POST http://127.0.0.1:9292/notify \
@@ -374,23 +387,23 @@ curl -X POST http://127.0.0.1:9292/notify \
 
 **POST /notify**
 
-| Field      | Type     | Required | Description                              |
-|------------|----------|----------|------------------------------------------|
-| `title`    | string   | Yes      | Notification title                       |
-| `message`  | string   | Yes      | Notification body                        |
-| `priority` | integer  | No       | Priority 1-5 (maps to macOS levels)      |
-| `tags`     | string[] | No       | Emoji tags (e.g., `["warning", "fire"]`) |
+| 字段       | 类型     | 必填 | 说明                                     |
+|------------|----------|------|------------------------------------------|
+| `title`    | string   | 是   | 通知标题                                 |
+| `message`  | string   | 是   | 通知正文                                 |
+| `priority` | integer  | 否   | 优先级 1-5（映射到 macOS 中断级别）      |
+| `tags`     | string[] | 否   | Emoji 标签（如 `["warning", "fire"]`）   |
 
-**GET /health** - Returns `{"status": "ok"}` for health checks.
+**GET /health** - 返回 `{"status": "ok"}`，用于健康检查。
 
-### Example: Auto-run Script with Local Notifications
+### 示例：自动脚本 + 本地通知联动
 
-Combine `auto_run_script` with the local server to create rich feedback loops:
+将 `auto_run_script` 与本地服务器结合，可以构建丰富的反馈闭环：
 
 ```bash
 #!/bin/bash
-# auto_run_script for topic "deployments"
-# Receives message via $1 and env vars, then triggers a local follow-up notification
+# 主题 "deployments" 的 auto_run_script
+# 通过 $1 和环境变量接收消息，然后触发本地后续通知
 
 RESULT=$(deploy.sh "$NTFY_MESSAGE" 2>&1)
 EXIT_CODE=$?
@@ -404,87 +417,87 @@ else
 fi
 ```
 
-### Security
+### 安全性
 
-- Binds to `127.0.0.1` only (not accessible from the network)
-- Maximum request body size: 4 KB
-- No code execution - only triggers notifications
-- Disabled by default (requires `local_server_port` in config)
-- Configure via Settings window (click lock to edit, enter port)
-- Test your setup with the built-in curl example (click Copy button)
+- 仅绑定 `127.0.0.1`（外部网络无法访问）
+- 请求体最大 4 KB
+- 不执行任何代码——只触发通知
+- 默认禁用（需在配置中设置 `local_server_port`）
+- 可通过设置窗口配置（点击锁图标解锁编辑，输入端口号）
+- 使用内置的 curl 示例测试（点击"拷贝"按钮）
 
-## Priority Mapping
+## 优先级映射
 
-ntfy priority levels map to macOS interruption levels:
+ntfy 优先级与 macOS 中断级别的对应关系：
 
-- Priority 5 → Critical (bypasses Focus modes)
-- Priority 4 → Time Sensitive (prominently displayed)
-- Priority 1-3 → Active (normal notifications)
+- 优先级 5 → 紧急（Critical，穿透专注模式）
+- 优先级 4 → 时效性（Time Sensitive，醒目展示）
+- 优先级 1-3 → 普通（Active，常规通知）
 
 ## SF Symbols
 
-You can use any SF Symbol name for icons. Browse all symbols using the SF Symbols app (free from Apple).
+图标可以使用任意 SF Symbol 名称。使用 Apple 免费提供的 SF Symbols 应用浏览全部图标。
 
-## Markdown Messages
+## Markdown 消息
 
-macOS native notifications only support plain text and cannot render formatted markdown. ntfy-macos automatically strips markdown syntax from messages for cleaner display.
+macOS 原生通知仅支持纯文本，无法渲染格式化的 markdown。ntfy-macos 会自动剔除消息中的 markdown 语法，让显示更清爽。
 
-## Emoji Tags
+## Emoji 标签
 
-ntfy supports [emoji shortcodes](https://docs.ntfy.sh/emojis/) in the `Tags` field. These are automatically converted to emojis and prepended to the notification title.
+ntfy 支持在 `Tags` 字段中使用 [emoji 短代码](https://docs.ntfy.sh/emojis/)。这些短代码会自动转换为 emoji，并添加到通知标题前。
 
-Example: `Tags: warning,fire` → **⚠️🔥 Alert**
+示例：`Tags: warning,fire` → **⚠️🔥 Alert**
 
-## FAQ
+## 常见问题（FAQ）
 
-### Why don't notifications appear?
+### 通知不显示怎么办？
 
-- **Focus Mode**: Check if Focus/Do Not Disturb is enabled.
-- **Permissions**: Go to System Settings → Notifications → ntfy-macos and ensure notifications are allowed.
-- **Background execution**: If launched via `brew services`, ensure the app has permission to run in the background.
+- **专注模式**：检查是否开启了专注模式/勿扰模式。
+- **权限**：前往 系统设置 → 通知 → ntfy-macos，确认已允许通知。
+- **后台运行**：如果通过 `brew services` 启动，请确保应用有后台运行权限。
 
-### Permission dialog doesn't respond to clicks
+### 权限弹窗点击无响应
 
-If the permission dialog is unresponsive:
+如果权限弹窗无法点击：
 
-1. Stop the service: `brew services stop ntfy-macos`
-2. Grant permission manually: System Settings → Notifications → ntfy-macos → Allow Notifications
-3. Restart the service: `brew services start ntfy-macos`
+1. 停止服务：`brew services stop ntfy-macos`
+2. 手动授权：系统设置 → 通知 → ntfy-macos → 允许通知
+3. 重启服务：`brew services start ntfy-macos`
 
-## Troubleshooting
+## 故障排查
 
-- **Logs**: `~/.local/share/ntfy-macos/logs/ntfy-macos.log`
-- **Test Notifications**: `ntfy-macos test-notify --topic test`
-- **Connection Issues**: Verify server URL and token.
-- **Script Not Executing**: Ensure the script is executable (`chmod +x`).
+- **日志**：`~/.local/share/ntfy-macos/logs/ntfy-macos.log`
+- **测试通知**：`ntfy-macos test-notify --topic test`
+- **连接问题**：核对服务器地址和令牌。
+- **脚本未执行**：确认脚本有执行权限（`chmod +x`）。
 
-## Architecture
+## 架构
 
-- **Swift 6**: Modern Swift with strict concurrency
-- **URLSession**: Native streaming JSON support
-- **UserNotifications**: Rich macOS notifications
-- **Security Framework**: Keychain integration
-- **Yams**: YAML parsing
-- **Foundation & AppKit**: Core macOS frameworks
+- **Swift 6**：现代 Swift，严格并发检查
+- **URLSession**：原生流式 JSON 支持
+- **UserNotifications**：富 macOS 通知
+- **Security 框架**：钥匙串集成
+- **Yams**：YAML 解析
+- **Foundation & AppKit**：macOS 核心框架
 
-## Contributing
+## 参与贡献
 
-Contributions are welcome! Please open issues or pull requests on GitHub.
+欢迎贡献！请在 GitHub 上提交 issue 或 pull request。
 
-## License
+## 许可证
 
 MIT License
 
-## Credits
+## 致谢
 
-This project is a third-party client for [ntfy](https://ntfy.sh), created by [Philipp C. Heckel](https://github.com/binwiederhier).
+本项目是 [ntfy](https://ntfy.sh) 的第三方客户端，ntfy 由 [Philipp C. Heckel](https://github.com/binwiederhier) 创建。
 
-## Related Projects
+## 相关项目
 
-- [ntfy](https://ntfy.sh) - Simple pub-sub notification service
-- [ntfy-android](https://github.com/binwiederhier/ntfy-android) - Official Android app
-- [ntfy-ios](https://github.com/binwiederhier/ntfy-ios) - Official iOS app
+- [ntfy](https://ntfy.sh) - 简洁的 pub-sub 通知服务
+- [ntfy-android](https://github.com/binwiederhier/ntfy-android) - 官方 Android 应用
+- [ntfy-ios](https://github.com/binwiederhier/ntfy-ios) - 官方 iOS 应用
 
-## Support
+## 支持
 
-For bugs and feature requests, please open an issue on GitHub.
+如遇 bug 或有功能需求，请在 GitHub 上提交 issue。
