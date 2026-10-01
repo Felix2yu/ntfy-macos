@@ -28,7 +28,7 @@ class SettingsWindowController: NSObject, NSWindowDelegate {
         let hostingController = NSHostingController(rootView: SettingsView(viewModel: vm))
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 550),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 600),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -36,7 +36,7 @@ class SettingsWindowController: NSObject, NSWindowDelegate {
         window.title = "ntfy-macos 设置"
         window.isReleasedWhenClosed = false
         window.contentViewController = hostingController
-        window.minSize = NSSize(width: 650, height: 450)
+        window.minSize = NSSize(width: 560, height: 460)
         window.delegate = self
         WindowFramePersistence.restore(window, key: Self.frameKey)
 

@@ -53,9 +53,7 @@ struct EditableTopic: Identifiable {
 class SettingsViewModel: ObservableObject {
     @Published var servers: [EditableServer] = []
     @Published var localServerPort: String = ""
-    @Published var selectedServerID: UUID?
     @Published var hasUnsavedChanges: Bool = false
-    @Published var isLocked: Bool = true
     @Published var saveError: String?
     @Published var serverConnectionStates: [String: StatusBarController.ConnectionState] = [:]
 
@@ -117,9 +115,6 @@ class SettingsViewModel: ObservableObject {
                 originalUrl: server.url
             )
         }
-
-        // Auto-select first server
-        selectedServerID = servers.first?.id
 
         hasUnsavedChanges = false
         saveError = nil
@@ -218,7 +213,6 @@ class SettingsViewModel: ObservableObject {
             }
             // Reset unsaved flag (the assignment above triggers Combine)
             hasUnsavedChanges = false
-            isLocked = true
         } catch {
             saveError = "保存失败：\(error.localizedDescription)"
         }
@@ -226,7 +220,6 @@ class SettingsViewModel: ObservableObject {
 
     func cancel() {
         loadFromConfig()
-        isLocked = true
     }
 
     // MARK: - Server CRUD
@@ -237,14 +230,10 @@ class SettingsViewModel: ObservableObject {
             topics: [EditableTopic(name: "")]
         )
         servers.append(server)
-        selectedServerID = server.id
     }
 
     func removeServer(_ server: EditableServer) {
         servers.removeAll { $0.id == server.id }
-        if selectedServerID == server.id {
-            selectedServerID = servers.first?.id
-        }
     }
 
     // MARK: - Topic CRUD
@@ -263,15 +252,5 @@ class SettingsViewModel: ObservableObject {
 
     func serverBinding(for id: UUID) -> EditableServer? {
         servers.first { $0.id == id }
-    }
-
-    var selectedServer: EditableServer? {
-        guard let id = selectedServerID else { return nil }
-        return servers.first { $0.id == id }
-    }
-
-    func selectedServerIndex() -> Int? {
-        guard let id = selectedServerID else { return nil }
-        return servers.firstIndex { $0.id == id }
     }
 }

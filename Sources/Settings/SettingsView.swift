@@ -1,159 +1,122 @@
 import SwiftUI
 import AppKit
 
+/// Single-page grouped settings form: 通用 / ntfy 服务器 / 本地通知服务,
+/// servers rendered as collapsible rows so one or two servers stay compact.
 struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @State private var copiedCommand: String?
     @State private var statusTimer: Timer?
+
+    @AppStorage(AppSettings.expandMessagesByDefaultKey) private var expandByDefault = false
+    @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var loginError: String?
 
     private var isLocalServerEnabled: Bool {
         !viewModel.localServerPort.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            detail
+        Form {
+            generalSection
+            serversSection
+            localServerSection
         }
-        .frame(minWidth: 700, idealWidth: 800, minHeight: 500, idealHeight: 600)
+        .formStyle(.grouped)
+        .frame(minWidth: 560, idealWidth: 620, minHeight: 460, idealHeight: 600)
+        .safeAreaInset(edge: .bottom) { bottomBar }
         .onAppear {
             viewModel.refreshConnectionStates()
             startStatusTimer()
+            launchAtLogin = LoginItem.isEnabled
         }
         .onDisappear {
             stopStatusTimer()
         }
     }
 
-    // MARK: - Status Refresh Timer
+    // MARK: - 通用
 
-    private func startStatusTimer() {
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
-            Task { @MainActor in
-                viewModel.refreshConnectionStates()
+    private var generalSection: some View {
+        Section {
+            Toggle("开机时启动", isOn: Binding(
+                get: { launchAtLogin },
+                set: { newValue in
+                    if let error = LoginItem.setEnabled(newValue) {
+                        loginError = error
+                        return
+                    }
+                    loginError = nil
+                    launchAtLogin = newValue
+                }
+            ))
+            .help("登录后自动在菜单栏运行 ntfy-macos")
+
+            if let loginError {
+                Text(loginError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
+
+            Toggle("默认展开消息全文", isOn: $expandByDefault)
+                .help("长消息进入通知历史时即完整显示；单条仍可点击「收起」折回")
+        } header: {
+            Text("通用")
         }
     }
 
-    private func stopStatusTimer() {
-        statusTimer?.invalidate()
-        statusTimer = nil
-    }
+    // MARK: - 服务器
 
-    // MARK: - Sidebar
-
-    private var sidebar: some View {
-        List(selection: $viewModel.selectedServerID) {
-            Section {
-                localServerSection
-            } header: {
-                Text("本地服务器")
-                    .foregroundStyle(.secondary)
+    private var serversSection: some View {
+        Section {
+            ForEach($viewModel.servers) { $server in
+                ServerRowView(server: $server, viewModel: viewModel)
             }
 
-            Section("服务器") {
-                ForEach(viewModel.servers) { server in
-                    HStack {
-                        Label(
-                            server.url.isEmpty ? "新服务器" : server.url
-                                .replacingOccurrences(of: "https://", with: "")
-                                .replacingOccurrences(of: "http://", with: ""),
-                            systemImage: "server.rack"
-                        )
-                        .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        // Connection status indicator
-                        if !server.url.isEmpty, let state = viewModel.serverConnectionStates[server.url] {
-                            Circle()
-                                .fill(connectionColor(for: state))
-                                .frame(width: 8, height: 8)
-                                .help(connectionTooltip(for: state))
-                        }
-                    }
-                    .tag(server.id)
-                }
-                .onDelete { indexSet in
-                    guard !viewModel.isLocked else { return }
-                    for index in indexSet {
-                        viewModel.removeServer(viewModel.servers[index])
-                    }
+            Button {
+                viewModel.addServer()
+            } label: {
+                Label("添加服务器", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+        } header: {
+            HStack {
+                Text("ntfy 服务器")
+                if viewModel.hasUnsavedChanges {
+                    Circle()
+                        .fill(.orange)
+                        .frame(width: 6, height: 6)
+                        .help("有未保存的更改")
                 }
             }
         }
-        .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 400)
-        .safeAreaInset(edge: .bottom) {
-            bottomBar
-        }
     }
 
-    // MARK: - Connection State Helpers
-
-    private func connectionColor(for state: StatusBarController.ConnectionState) -> Color {
-        switch state {
-        case .connected:
-            return .green
-        case .connecting:
-            return .orange
-        case .disconnected:
-            return .red
-        }
-    }
-
-    private func connectionTooltip(for state: StatusBarController.ConnectionState) -> String {
-        switch state {
-        case .connected:
-            return "已连接"
-        case .connecting:
-            return "连接中…"
-        case .disconnected:
-            return "已断开"
-        }
-    }
-
-    // MARK: - Local Server Section
+    // MARK: - 本地通知服务
 
     private var localServerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Port configuration
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("端口")
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    TextField("如 9292", text: $viewModel.localServerPort)
-                        .modifier(LockedTextFieldModifier(isLocked: viewModel.isLocked))
-                        .frame(width: 100)
-                        .multilineTextAlignment(.trailing)
-                        .disabled(viewModel.isLocked)
-                }
-
-                Text("端口范围须为 1024–65535")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+        Section {
+            HStack {
+                Text("端口")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                TextField("留空以禁用", text: $viewModel.localServerPort)
+                    .frame(width: 120)
+                    .multilineTextAlignment(.trailing)
             }
 
-            // Usage example (shown when port is configured)
+            Text("端口范围须为 1024–65535；留空表示禁用本地通知服务。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             if isLocalServerEnabled {
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("试一试：")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    // curl example with copy
-                    commandRow(
-                        label: "curl",
-                        command: "curl -X POST http://127.0.0.1:\(viewModel.localServerPort)/notify -H \"Content-Type: application/json\" -d '{\"title\": \"Hello\", \"message\": \"Hello from ntfy-macos!\"}'"
-                    )
-                }
+                commandRow(
+                    label: "curl",
+                    command: "curl -X POST http://127.0.0.1:\(viewModel.localServerPort)/notify -H \"Content-Type: application/json\" -d '{\"title\": \"Hello\", \"message\": \"Hello from ntfy-macos!\"}'"
+                )
             }
+        } header: {
+            Text("本地通知服务")
         }
     }
 
@@ -186,7 +149,6 @@ struct SettingsView: View {
                 NSPasteboard.general.setString(command, forType: .string)
                 copiedCommand = command
 
-                // Reset after 2 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                     if copiedCommand == command {
                         copiedCommand = nil
@@ -231,81 +193,158 @@ struct SettingsView: View {
         )
     }
 
-    // MARK: - Bottom Bar
+    // MARK: - Bottom bar
 
     private var bottomBar: some View {
-        HStack {
-            Button {
-                viewModel.isLocked.toggle()
-            } label: {
-                Image(systemName: viewModel.isLocked ? "lock.fill" : "lock.open.fill")
-            }
-            .buttonStyle(.plain)
-            .help(viewModel.isLocked ? "点击解锁编辑" : "锁定编辑")
-
+        VStack(spacing: 0) {
             Divider()
-                .frame(height: 16)
-
-            Button(action: viewModel.addServer) {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.borderless)
-            .disabled(viewModel.isLocked)
-
-            if let selectedID = viewModel.selectedServerID,
-               let server = viewModel.servers.first(where: { $0.id == selectedID }) {
-                Button(action: { viewModel.removeServer(server) }) {
-                    Image(systemName: "minus")
+            HStack(spacing: 10) {
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: ConfigManager.defaultConfigPath))
+                } label: {
+                    Image(systemName: "doc.text")
                 }
                 .buttonStyle(.borderless)
-                .disabled(viewModel.isLocked)
-            }
+                .help("在编辑器中打开配置文件")
 
-            Spacer()
+                if let error = viewModel.saveError {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                }
 
-            if viewModel.hasUnsavedChanges {
-                Circle()
-                    .fill(.orange)
-                    .frame(width: 8, height: 8)
-                    .help("有未保存的更改")
-            }
+                Spacer()
 
-            Button {
-                let path = ConfigManager.defaultConfigPath
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
-            } label: {
-                Image(systemName: "doc.text")
+                Button("取消") {
+                    viewModel.cancel()
+                }
+                .keyboardShortcut(.escape, modifiers: [])
+
+                Button("保存") {
+                    viewModel.save()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!viewModel.hasUnsavedChanges)
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderless)
-            .disabled(viewModel.isLocked)
-            .help("在编辑器中打开配置文件")
+            .padding(12)
         }
-        .padding(8)
+        .background(.bar)
     }
 
-    // MARK: - Detail
+    // MARK: - Status refresh timer
 
-    @ViewBuilder
-    private var detail: some View {
-        if let index = viewModel.selectedServerIndex() {
-            ServerDetailView(
-                server: $viewModel.servers[index],
-                viewModel: viewModel
-            )
-            .id(viewModel.servers[index].id)
-        } else {
-            VStack(spacing: 16) {
-                Image(systemName: "server.rack")
-                    .font(.system(size: 48))
+    private func startStatusTimer() {
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            Task { @MainActor in
+                viewModel.refreshConnectionStates()
+            }
+        }
+    }
+
+    private func stopStatusTimer() {
+        statusTimer?.invalidate()
+        statusTimer = nil
+    }
+}
+
+// MARK: - Server row (collapsible)
+
+private struct ServerRowView: View {
+    @Binding var server: EditableServer
+    @ObservedObject var viewModel: SettingsViewModel
+    @State private var showTokenSheet = false
+    @State private var isExpanded = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(spacing: 10) {
+                HStack {
+                    Text("URL")
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $server.url)
+                }
+
+                HStack {
+                    if server.token.isEmpty {
+                        Text("令牌：未配置")
+                            .foregroundStyle(.secondary)
+                    } else if server.storeInKeychain {
+                        Label("令牌存储于钥匙串", systemImage: "key.fill")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("令牌存储于配置文件", systemImage: "doc.text")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("管理…") {
+                        showTokenSheet = true
+                    }
+                }
+
+                Toggle("重连时拉取错过的消息", isOn: $server.fetchMissed)
                     .foregroundStyle(.secondary)
-                Text("选择或添加一个服务器")
-                    .foregroundStyle(.secondary)
-                Button("添加服务器") {
-                    viewModel.isLocked = false
-                    viewModel.addServer()
+
+                Divider()
+
+                ForEach($server.topics) { $topic in
+                    TopicRowView(topic: $topic) {
+                        server.topics.removeAll { $0.id == topic.id }
+                    }
+                }
+
+                HStack {
+                    Button {
+                        viewModel.addTopic(to: server.id)
+                    } label: {
+                        Label("添加主题", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderless)
+
+                    Spacer()
+
+                    Button(role: .destructive) {
+                        viewModel.removeServer(server)
+                    } label: {
+                        Text("删除此服务器")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 4)
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(connectionColor(for: server.url))
+                    .frame(width: 8, height: 8)
+                Text(server.url.isEmpty ? "新服务器" : server.url)
+                    .fontWeight(.medium)
+                Spacer()
+                Text("\(server.topics.count) 个主题")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .sheet(isPresented: $showTokenSheet) {
+            TokenSheetView(server: $server)
+        }
+    }
+
+    private func connectionColor(for url: String) -> Color {
+        guard !url.isEmpty, let state = viewModel.serverConnectionStates[url] else { return .gray }
+        switch state {
+        case .connected: return .green
+        case .connecting: return .orange
+        case .disconnected: return .red
         }
     }
 }

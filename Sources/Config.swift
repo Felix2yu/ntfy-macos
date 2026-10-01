@@ -2,12 +2,12 @@ import Foundation
 import Yams
 
 struct NotificationAction: Codable {
-    let title: String
-    let type: String      // "script", "view", "shortcut", or "applescript"
-    let path: String?     // for scripts and applescript files
-    let url: String?      // for view actions
-    let name: String?     // for shortcuts (the shortcut name)
-    let script: String?   // for inline applescript
+    var title: String
+    var type: String      // "script", "view", "shortcut", or "applescript"
+    var path: String?     // for scripts and applescript files
+    var url: String?      // for view actions
+    var name: String?     // for shortcuts (the shortcut name)
+    var script: String?   // for inline applescript
 
     init(title: String, type: String, path: String? = nil, url: String? = nil, name: String? = nil, script: String? = nil) {
         self.title = title
