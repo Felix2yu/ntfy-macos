@@ -12,7 +12,11 @@ struct MessageCardView: View {
     let onAction: (NtfyMessage.NtfyAction) -> Void
 
     @State private var isHovered = false
-    @State private var isExpanded = false
+    /// nil = follow the 默认展开 setting; set once the user toggles this card.
+    @State private var expansionOverride: Bool?
+    @AppStorage(AppSettings.expandMessagesByDefaultKey) private var expandByDefault = false
+
+    private var expanded: Bool { expansionOverride ?? expandByDefault }
 
     private var message: NtfyMessage { stored.message }
 
@@ -116,14 +120,40 @@ struct MessageCardView: View {
     @ViewBuilder
     private var bodyText: some View {
         if let body = message.plainTextMessage ?? message.message, !body.isEmpty {
-            // Plain text (markdown stripped) keeps rendering cost low for large histories.
-            Text(body)
-                .font(.callout)
-                .foregroundStyle(.primary)
-                .lineLimit(isExpanded ? nil : 6)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .onTapGesture { isExpanded.toggle() }
+            VStack(alignment: .leading, spacing: 2) {
+                // Plain text (markdown stripped) keeps rendering cost low for large histories.
+                Text(body)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .lineLimit(expanded ? nil : 6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .onTapGesture { if isExpandable { toggleExpanded() } }
+                if isExpandable {
+                    Button {
+                        toggleExpanded()
+                    } label: {
+                        Label(expanded ? "收起" : "展开全文",
+                              systemImage: expanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// Long bodies are clipped to 6 lines; heuristic on raw line count and length
+    /// decides whether the expand affordance is shown.
+    private var isExpandable: Bool {
+        guard let body = message.plainTextMessage ?? message.message else { return false }
+        return body.split(separator: "\n", omittingEmptySubsequences: false).count > 6 || body.count > 320
+    }
+
+    private func toggleExpanded() {
+        withAnimation(.easeOut(duration: 0.15)) {
+            expansionOverride = !expanded
         }
     }
 

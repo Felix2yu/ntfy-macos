@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Root view of the notification history window:
 /// sidebar with topics (grouped by server, unread badges) + message list.
@@ -9,6 +10,7 @@ struct HistoryView: View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             if let ref = viewModel.selectedTopic {
                 TopicDetailView(viewModel: viewModel, topicRef: ref)
@@ -20,6 +22,28 @@ struct HistoryView: View {
             }
         }
         .frame(minWidth: 860, minHeight: 560)
+        .toolbar {
+            // Own toggle pinned to the leading edge: the automatic one rides the
+            // column divider, so it jumped to the far right when the sidebar hid.
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    NSApp.keyWindow?.firstResponder?
+                        .tryToPerform(NSSelectorFromString("toggleSidebar:"), with: nil)
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("显示/隐藏侧栏")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.markEverythingRead()
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .help(viewModel.totalUnread > 0 ? "全部标记已读（\(viewModel.totalUnread) 条未读）" : "没有未读消息")
+                .disabled(viewModel.totalUnread == 0)
+            }
+        }
         .onAppear {
             viewModel.refreshSidebar()
         }

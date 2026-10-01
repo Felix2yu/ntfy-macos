@@ -230,18 +230,37 @@ final class HistoryViewModel: ObservableObject {
     func markAllRead(for ref: TopicRef) {
         Task { [weak self] in
             guard let self else { return }
-            // Collect the unread set first: after markAllRead it is gone.
-            let targets = await messageTargets(for: ref, onlyUnread: true)
-            try? await self.store.markAllRead(serverURL: ref.serverURL, topic: ref.topic)
-            self.postStoreChange(for: ref)
-            NotificationManager.shared.revoke(messageIDs: targets.map { $0.messageID })
-            await MessageActionService.markAllReadOnServer(
-                serverURL: ref.serverURL,
-                topic: ref.topic,
-                targets: targets,
-                authToken: ConfigManager.shared.getAuthToken(forServer: ref.serverURL)
-            )
+            await markTopicRead(for: ref, syncToServer: true)
         }
+    }
+
+    /// Clears unread across every topic at once. Local-only on purpose: replaying a
+    /// server mark for thousands of catch-up messages would publish one clear event per
+    /// message and flood every other device. Per-topic actions still sync to the server.
+    func markEverythingRead() {
+        let refs = unreadCounts.filter { $0.value > 0 }.map(\.key)
+        guard !refs.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            for ref in refs {
+                await markTopicRead(for: ref, syncToServer: false)
+            }
+        }
+    }
+
+    private func markTopicRead(for ref: TopicRef, syncToServer: Bool) async {
+        // Collect the unread set first: after markAllRead it is gone.
+        let targets = await messageTargets(for: ref, onlyUnread: true)
+        try? await store.markAllRead(serverURL: ref.serverURL, topic: ref.topic)
+        postStoreChange(for: ref)
+        NotificationManager.shared.revoke(messageIDs: targets.map { $0.messageID })
+        guard syncToServer else { return }
+        await MessageActionService.markAllReadOnServer(
+            serverURL: ref.serverURL,
+            topic: ref.topic,
+            targets: targets,
+            authToken: ConfigManager.shared.getAuthToken(forServer: ref.serverURL)
+        )
     }
 
     /// Non-deleted messages of a topic, paged by time cursor.
