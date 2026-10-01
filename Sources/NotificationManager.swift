@@ -15,6 +15,11 @@ final class NotificationManager: NSObject, @unchecked Sendable {
     private let lock = NSLock()
     private var _scriptRunner: (any ScriptRunnerProtocol)?
 
+    private let throttle = NotificationThrottle()
+
+    /// Single banner that replaces the flood while a message storm is in progress.
+    static let burstSummaryIdentifier = "ntfy:burst-summary"
+
     private override init() {
         super.init()
         // Don't call clearCategories() here - it accesses UNUserNotificationCenter
@@ -95,19 +100,97 @@ final class NotificationManager: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Displays a notification based on an ntfy message and topic configuration
-    func showNotification(for message: NtfyMessage, topicConfig: TopicConfig?) {
-        guard let topicConfig = topicConfig else {
-            showBasicNotification(for: message)
-            return
-        }
+    // MARK: - Banner identity
 
+    /// Delivered notifications are keyed by the ntfy message id rather than a random UUID,
+    /// so a message read or deleted on *any* device can be traced back to its banner.
+    static func identifier(forMessageID messageID: String) -> String {
+        "ntfy:\(messageID)"
+    }
+
+    /// User Notifications aborts the process (`bundleProxyForCurrentProcess is nil`) unless
+    /// the executable runs out of an app bundle, which is also the only case where there can
+    /// be banners to talk about.
+    static var canManageBanners: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    /// Withdraws the banners these messages left on screen — used when the message gets
+    /// marked read or deleted, here or on another device.
+    func revoke(messageIDs: [String]) {
+        let identifiers = messageIDs
+            .filter { !$0.isEmpty }
+            .map { Self.identifier(forMessageID: $0) }
+        guard !identifiers.isEmpty, Self.canManageBanners else { return }
+
+        Log.info("Revoking \(identifiers.count) notification(s): \(messageIDs.joined(separator: ", "))")
+        DispatchQueue.main.async {
+            self.center.removeDeliveredNotifications(withIdentifiers: identifiers)
+            self.center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        }
+    }
+
+    /// Displays a notification based on an ntfy message and topic configuration.
+    /// During a message storm, individual banners are folded into one summary notification —
+    /// hundreds of sound-bearing banners in a few seconds freeze notification center and its
+    /// sound queue survives app exit.
+    func showNotification(for message: NtfyMessage, topicConfig: TopicConfig?) {
         // Skip notification if silent mode is enabled
-        if topicConfig.silent == true {
+        if topicConfig?.silent == true {
             print("Silent notification for topic \(message.topic) - skipping display")
             return
         }
 
+        let identifier = Self.identifier(forMessageID: message.id)
+        switch throttle.register(topic: message.topic, priority: message.priority, identifier: identifier) {
+        case .individual:
+            if let topicConfig {
+                showTopicNotification(for: message, topicConfig: topicConfig)
+            } else {
+                showBasicNotification(for: message)
+            }
+        case .coalesced(let count, let topics, let firstOfBurst, let absorbed):
+            showBurstSummary(count: count, topics: topics, firstOfBurst: firstOfBurst, absorbed: absorbed)
+        }
+    }
+
+    /// One replaceable banner for the whole storm. The sound plays only when the burst
+    /// starts; each later message replaces the summary in place, updating the count.
+    /// When the burst begins it also withdraws the individual banners that slipped out
+    /// during the ramp-up, so the storm leaves a single trace in notification center.
+    private func showBurstSummary(count: Int, topics: [String], firstOfBurst: Bool, absorbed: [String]) {
+        guard Self.canManageBanners else { return }
+
+        if !absorbed.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: absorbed)
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "\(count) 条新消息"
+        let shownTopics = topics.prefix(3).joined(separator: "、")
+        if topics.count > 3 {
+            content.body = "消息过于集中，已合并显示：\(shownTopics) 等 \(topics.count) 个主题"
+        } else {
+            content.body = "消息过于集中，已合并显示：\(shownTopics)"
+        }
+        content.interruptionLevel = .active
+        if firstOfBurst {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
+        }
+
+        let request = UNNotificationRequest(
+            identifier: Self.burstSummaryIdentifier,
+            content: content,
+            trigger: nil
+        )
+        center.add(request) { error in
+            if let error = error {
+                Log.error("Failed to show burst summary notification: \(error)")
+            }
+        }
+    }
+
+    private func showTopicNotification(for message: NtfyMessage, topicConfig: TopicConfig) {
         let content = UNMutableNotificationContent()
         let emojiPrefix = EmojiTags.emojiPrefix(for: message.tags)
         // Use plain text versions to strip markdown syntax (macOS notifications don't render markdown)
@@ -225,8 +308,11 @@ final class NotificationManager: NSObject, @unchecked Sendable {
         content.userInfo = userInfo
 
         // Create and schedule notification
-        let identifier = UUID().uuidString
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        let request = UNNotificationRequest(
+            identifier: Self.identifier(forMessageID: message.id),
+            content: content,
+            trigger: nil
+        )
 
         center.add(request) { error in
             if let error = error {
@@ -245,8 +331,11 @@ final class NotificationManager: NSObject, @unchecked Sendable {
         // Use Glass sound to distinguish from other notification services
         content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
 
-        let identifier = UUID().uuidString
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        let request = UNNotificationRequest(
+            identifier: Self.identifier(forMessageID: message.id),
+            content: content,
+            trigger: nil
+        )
 
         center.add(request) { error in
             if let error = error {
@@ -418,8 +507,8 @@ final class NotificationManager: NSObject, @unchecked Sendable {
 
     func showTestNotification(topic: String) {
         let content = UNMutableNotificationContent()
-        content.title = "Test Notification"
-        content.body = "This is a test notification for topic: \(topic)"
+        content.title = "测试通知"
+        content.body = "主题 \(topic) 的测试通知"
         content.sound = .default
 
         // The app icon on the left side of the notification is automatically
