@@ -46,6 +46,7 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
     private var configWatcher: ConfigWatcher?
     private var localServer: LocalNotificationServer?
     private var messageStore: MessageStore?
+    private var badgeSync: UnreadBadgeSync?
     private var historySync: HistorySyncService?
 
     init() {
@@ -70,6 +71,14 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
                 let sync = HistorySyncService(store: store)
                 self.historySync = sync
                 HistoryWindowController.shared.configure(store: store, syncService: sync)
+            }
+            // Seed the menu bar badge from the database and keep it in sync afterwards.
+            Task { @MainActor in
+                let badgeSync = UnreadBadgeSync(store: store) { count in
+                    StatusBarController.shared.setUnreadCount(count)
+                }
+                badgeSync.start()
+                self.badgeSync = badgeSync
             }
             Log.info("History database opened at \(MessageStore.defaultDatabasePath)")
         } catch {
@@ -313,7 +322,6 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
                     object: nil,
                     userInfo: ["topicRef": TopicRef(serverURL: serverURL, topic: message.topic)]
                 )
-                refreshUnreadBadge(store: store)
             }
         }
 
@@ -358,15 +366,6 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
                 object: nil,
                 userInfo: ["topicRef": TopicRef(serverURL: serverURL, topic: event.topic)]
             )
-            refreshUnreadBadge(store: store)
-        }
-    }
-
-    /// Refreshes the unread badge on the status bar icon.
-    private func refreshUnreadBadge(store: MessageStore) {
-        Task { @MainActor in
-            let total = (try? await store.totalUnreadCount()) ?? 0
-            StatusBarController.shared.setUnreadCount(total)
         }
     }
 
