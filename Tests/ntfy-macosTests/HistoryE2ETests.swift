@@ -1,11 +1,13 @@
 import XCTest
 @testable import ntfy_macos
 
-/// End-to-end tests for the history pipeline against a real ntfy server (ntfy.sh):
-/// publish → poll (since) → on-disk SQLite store → read/delete operations.
+/// End-to-end tests for the history pipeline against the user's real ntfy server
+/// (ntfy.yufei.im — reachable through the system proxy, unlike ntfy.sh which rate-limits
+/// anonymous publishers with HTTP 429): publish → poll (since) → on-disk SQLite store →
+/// read/delete operations.
 final class HistoryE2ETests: XCTestCase {
 
-    private static let serverURL = "https://ntfy.sh"
+    private static let serverURL = "https://ntfy.yufei.im"
 
     private func makeRandomTopic() -> String {
         "ntfy-macos-hist-e2e-" + UUID().uuidString.prefix(8).lowercased()
@@ -35,7 +37,7 @@ final class HistoryE2ETests: XCTestCase {
         try await Self.publish(topic: topic, title: "Second", body: "two")
         try await Self.publish(topic: topic, title: "Third", body: "three")
 
-        // ntfy.sh caches asynchronously — small settle delay
+        // The server caches asynchronously — small settle delay
         try await Task.sleep(nanoseconds: 1_500_000_000)
 
         // 2. Full poll into the store

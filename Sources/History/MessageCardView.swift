@@ -5,16 +5,19 @@ import SwiftUI
 /// and hover operations (read toggle / copy / delete).
 struct MessageCardView: View {
     let stored: StoredMessage
+    let attachmentState: HistoryViewModel.AttachmentState?
     let onToggleRead: () -> Void
     let onDelete: () -> Void
     let onCopy: () -> Void
     let onOpenURL: (String) -> Void
     let onAction: (NtfyMessage.NtfyAction) -> Void
+    let onDownloadAttachment: () -> Void
 
     @State private var isHovered = false
     /// nil = follow the 默认展开 setting; set once the user toggles this card.
     @State private var expansionOverride: Bool?
     @AppStorage(AppSettings.expandMessagesByDefaultKey) private var expandByDefault = false
+    @AppStorage(AppSettings.messageFontSizeKey) private var messageFontSize = 13.0
 
     private var expanded: Bool { expansionOverride ?? expandByDefault }
 
@@ -119,16 +122,24 @@ struct MessageCardView: View {
 
     @ViewBuilder
     private var bodyText: some View {
-        if let body = message.plainTextMessage ?? message.message, !body.isEmpty {
+        if let body = bodyString, !body.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                // Plain text (markdown stripped) keeps rendering cost low for large histories.
-                Text(body)
-                    .font(.callout)
-                    .foregroundStyle(.primary)
-                    .lineLimit(expanded ? nil : 6)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .onTapGesture { if isExpandable { toggleExpanded() } }
+                if message.isMarkdown {
+                    // Rich rendering for the history list; banners still get plain text.
+                    Text(MarkdownRenderer.render(body, fontSize: CGFloat(messageFontSize)))
+                        .lineLimit(expanded ? nil : 6)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .onTapGesture { if isExpandable { toggleExpanded() } }
+                } else {
+                    Text(body)
+                        .font(.system(size: messageFontSize))
+                        .foregroundStyle(.primary)
+                        .lineLimit(expanded ? nil : 6)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .onTapGesture { if isExpandable { toggleExpanded() } }
+                }
                 if isExpandable {
                     Button {
                         toggleExpanded()
@@ -144,10 +155,17 @@ struct MessageCardView: View {
         }
     }
 
+    /// Markdown messages render from the raw source; everything else keeps the
+    /// markdown-stripped plain text for consistency with banners.
+    private var bodyString: String? {
+        if message.isMarkdown { return message.message }
+        return message.plainTextMessage ?? message.message
+    }
+
     /// Long bodies are clipped to 6 lines; heuristic on raw line count and length
     /// decides whether the expand affordance is shown.
     private var isExpandable: Bool {
-        guard let body = message.plainTextMessage ?? message.message else { return false }
+        guard let body = bodyString else { return false }
         return body.split(separator: "\n", omittingEmptySubsequences: false).count > 6 || body.count > 320
     }
 
@@ -182,22 +200,41 @@ struct MessageCardView: View {
     @ViewBuilder
     private var attachmentRow: some View {
         if let attachment = message.attachment {
-            HStack(spacing: 6) {
-                Image(systemName: "paperclip")
-                    .foregroundStyle(.secondary)
-                Text(attachment.name)
-                    .font(.callout)
-                    .lineLimit(1)
-                if let size = attachment.size {
-                    Text(MessageActionService.formattedFileSize(size))
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+            let isFailed = {
+                if case .failed = attachmentState { return true }
+                return false
+            }()
+            Button(action: onDownloadAttachment) {
+                HStack(spacing: 6) {
+                    Image(systemName: isFailed ? "exclamationmark.arrow.circlepath" : "paperclip")
+                        .foregroundStyle(isFailed ? Color.red : Color.secondary)
+                    Text(attachment.name)
+                        .font(.callout)
+                        .lineLimit(1)
+                    if let size = attachment.size {
+                        Text(MessageActionService.formattedFileSize(size))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    switch attachmentState {
+                    case .downloading:
+                        ProgressView()
+                            .controlSize(.small)
+                    case .failed(let reason):
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .lineLimit(1)
+                    case nil:
+                        EmptyView()
+                    }
                 }
+                .foregroundStyle(.link)
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(.link)
-            .contentShape(Rectangle())
-            .onTapGesture { onOpenURL(attachment.url) }
-            .help("下载附件")
+            .buttonStyle(.plain)
+            .disabled(attachmentState == .downloading)
+            .help("下载并在默认应用中预览附件")
         }
     }
 

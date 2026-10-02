@@ -273,44 +273,132 @@ actor MessageStore {
         try statement.run()
     }
 
+    /// Hard-removes a topic's messages and sync state. Used when a subscription is
+    /// deleted from the config, so its unread rows cannot keep the menu bar badge lit
+    /// with no UI left to clear them.
+    func deleteTopic(serverURL: String, topic: String) throws {
+        for sql in [
+            "DELETE FROM messages WHERE server_url = ? AND topic = ?",
+            "DELETE FROM sync_state WHERE server_url = ? AND topic = ?",
+        ] {
+            let statement = try db.prepare(sql)
+            defer { statement.finalize() }
+            try statement.bindText(serverURL, at: 1)
+            try statement.bindText(topic, at: 2)
+            try statement.run()
+        }
+    }
+
+    // MARK: - Retention (audit 2.4)
+
+    /// Bounds how long history rows accumulate. Every rule can be disabled with 0.
+    struct RetentionPolicy: Equatable, Sendable {
+        /// Tombstones older than this are physically removed. Until then they must
+        /// survive so a `since=all` poll replay cannot resurrect the deleted message.
+        var tombstoneGraceDays: Int = 30
+        /// Read messages older than this are removed (unread are always kept).
+        var readRetentionDays: Int = 90
+        /// Beyond the newest N live rows per topic, older read rows are removed.
+        var maxReadRowsPerTopic: Int = 2000
+
+        static let standard = RetentionPolicy()
+    }
+
+    /// Deletes the number of rows changed by the most recently completed statement.
+    @discardableResult
+    func enforceRetention(_ policy: RetentionPolicy = .standard, now: Date = Date()) throws -> Int {
+        let nowSeconds = Int(now.timeIntervalSince1970)
+        let daySeconds = 86_400
+        var deleted = 0
+
+        var rules: [(sql: String, values: [Int])] = []
+        if policy.tombstoneGraceDays > 0 {
+            rules.append((
+                "DELETE FROM messages WHERE is_deleted = 1 AND COALESCE(deleted_at, time) < ?",
+                [nowSeconds - policy.tombstoneGraceDays * daySeconds]
+            ))
+        }
+        if policy.readRetentionDays > 0 {
+            rules.append((
+                "DELETE FROM messages WHERE is_deleted = 0 AND is_read = 1 AND time < ?",
+                [nowSeconds - policy.readRetentionDays * daySeconds]
+            ))
+        }
+        if policy.maxReadRowsPerTopic > 0 {
+            // Group-wise top-K trim: drop read rows that have at least N newer live
+            // rows in the same topic. `GROUP BY 1` pins this to one aggregate group —
+            // without it SQLite rejects the HAVING clause. Unread rows are never
+            // dropped by the cap.
+            rules.append((
+                """
+                DELETE FROM messages
+                WHERE is_deleted = 0 AND is_read = 1 AND EXISTS (
+                    SELECT 1, COUNT(*) FROM messages AS newer
+                    WHERE newer.server_url = messages.server_url AND newer.topic = messages.topic
+                      AND newer.is_deleted = 0
+                      AND (newer.time > messages.time
+                           OR (newer.time = messages.time AND newer.rowid_pk > messages.rowid_pk))
+                    GROUP BY 1
+                    HAVING COUNT(*) >= ?
+                )
+                """,
+                [policy.maxReadRowsPerTopic]
+            ))
+        }
+
+        for rule in rules {
+            let statement = try db.prepare(rule.sql)
+            defer { statement.finalize() }
+            for (index, value) in rule.values.enumerated() {
+                try statement.bindInt(value, at: Int32(index + 1))
+            }
+            try statement.run()
+            deleted += db.changesCount
+        }
+        return deleted
+    }
+
+    /// Reclaims the file space left behind by large deletions. Expensive — call rarely.
+    func vacuum() throws {
+        try db.execute("VACUUM;")
+    }
+
     // MARK: - Queries
 
     /// Fetches messages of a topic, newest first, with cursor pagination.
     /// - Parameters:
     ///   - limit: max rows to return.
-    ///   - beforeTime: only return messages strictly older than this unix timestamp (cursor for "load older").
+    ///   - before: composite `(time, rowID)` cursor for "load older" (audit 2.3).
     ///   - onlyUnread: filter to unread messages only.
     ///   - searchText: substring match on title/message (case-insensitive).
     func messages(
         serverURL: String,
         topic: String,
         limit: Int = 100,
-        beforeTime: Int? = nil,
+        before: PageCursor? = nil,
         onlyUnread: Bool = false,
         searchText: String? = nil
     ) throws -> [StoredMessage] {
         var sql = """
         SELECT server_url, topic, msg_id, sequence_id, event, time, message, title, priority,
-               tags_json, click, actions_json, attachment_json, content_type, is_read, is_deleted
+               tags_json, click, actions_json, attachment_json, content_type, is_read, is_deleted, rowid_pk
         FROM messages
         WHERE server_url = ? AND topic = ? AND is_deleted = 0
         """
         var bindings: [SQLValue] = [.text(serverURL), .text(topic)]
 
-        if let beforeTime {
-            sql += " AND time < ?"
-            bindings.append(.int(beforeTime))
+        if let before {
+            sql += " AND (time < ? OR (time = ? AND rowid_pk < ?))"
+            bindings.append(.int(before.time))
+            bindings.append(.int(before.time))
+            bindings.append(.int(Int(before.rowID)))
         }
         if onlyUnread {
             sql += " AND is_read = 0"
         }
         if let searchText, !searchText.isEmpty {
             sql += " AND (title LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\')"
-            let escaped = searchText
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "%", with: "\\%")
-                .replacingOccurrences(of: "_", with: "\\_")
-            let pattern = "%\(escaped)%"
+            let pattern = Self.likePattern(searchText)
             bindings.append(.text(pattern))
             bindings.append(.text(pattern))
         }
@@ -328,6 +416,70 @@ actor MessageStore {
             results.append(try Self.storedMessage(from: statement, serverURL: serverURL, topic: topic))
         }
         return results
+    }
+
+    /// Substring search across every topic (title, body and topic name), newest first.
+    /// - Parameters:
+    ///   - limit: max rows to return.
+    ///   - before: composite `(time, rowID)` cursor for "load older" (audit 2.3).
+    func searchAll(query: String, limit: Int = 200, before: PageCursor? = nil) throws -> [StoredMessage] {
+        var sql = """
+        SELECT server_url, topic, msg_id, sequence_id, event, time, message, title, priority,
+               tags_json, click, actions_json, attachment_json, content_type, is_read, is_deleted, rowid_pk
+        FROM messages
+        WHERE is_deleted = 0
+          AND (title LIKE ? ESCAPE '\\' OR message LIKE ? ESCAPE '\\' OR topic LIKE ? ESCAPE '\\')
+        """
+        let pattern = Self.likePattern(query)
+        var bindings: [SQLValue] = [.text(pattern), .text(pattern), .text(pattern)]
+
+        if let before {
+            sql += " AND (time < ? OR (time = ? AND rowid_pk < ?))"
+            bindings.append(.int(before.time))
+            bindings.append(.int(before.time))
+            bindings.append(.int(Int(before.rowID)))
+        }
+        sql += " ORDER BY time DESC, rowid_pk DESC LIMIT ?"
+        bindings.append(.int(limit))
+
+        let statement = try db.prepare(sql)
+        defer { statement.finalize() }
+        for (offset, value) in bindings.enumerated() {
+            try value.bind(to: statement, at: Int32(offset + 1))
+        }
+
+        var results: [StoredMessage] = []
+        while try statement.step() {
+            // server_url/topic come from the row itself: unlike messages() this spans
+            // every topic, so there is no caller-supplied value to fall back on.
+            let serverURL = statement.columnText(0) ?? ""
+            let topic = statement.columnText(1) ?? ""
+            results.append(try Self.storedMessage(from: statement, serverURL: serverURL, topic: topic))
+        }
+        return results
+    }
+
+    /// Whether a physical row exists regardless of read/tombstone flags (an expired
+    /// tombstone must be gone for good; UI queries filter them out and can't tell).
+    func rawRowExists(serverURL: String, topic: String, messageID: String) throws -> Bool {
+        let rows = try db.query(
+            "SELECT 1 FROM messages WHERE server_url = ? AND topic = ? AND msg_id = ?",
+            bind: { statement in
+                try statement.bindText(serverURL, at: 1)
+                try statement.bindText(topic, at: 2)
+                try statement.bindText(messageID, at: 3)
+            },
+            row: { _ in () }
+        )
+        return !rows.isEmpty
+    }
+
+    /// All (server, topic) pairs that have any history rows, subscribed or not.
+    func trackedTopics() throws -> Set<TopicRef> {        let sql = "SELECT DISTINCT server_url, topic FROM messages"
+        let rows = try db.query(sql, bind: { _ in }, row: { statement -> TopicRef in
+            TopicRef(serverURL: statement.columnText(0) ?? "", topic: statement.columnText(1) ?? "")
+        })
+        return Set(rows)
     }
 
     /// Unread counts per topic, excluding tombstoned messages.
@@ -401,6 +553,15 @@ actor MessageStore {
 
     // MARK: - Helpers
 
+    /// Case-insensitive substring LIKE pattern with the wildcards in the user text escaped.
+    private static func likePattern(_ text: String) -> String {
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        return "%\(escaped)%"
+    }
+
     private enum SQLValue {
         case text(String)
         case int(Int)
@@ -445,7 +606,8 @@ actor MessageStore {
             topic: topic,
             message: message,
             isRead: (statement.columnInt(14) ?? 0) == 1,
-            isDeleted: (statement.columnInt(15) ?? 0) == 1
+            isDeleted: (statement.columnInt(15) ?? 0) == 1,
+            rowID: Int64(statement.columnInt(16) ?? 0)
         )
     }
 }

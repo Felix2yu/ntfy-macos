@@ -60,7 +60,8 @@ enum MessageActionService {
         topic: String,
         sequenceID: String?,
         messageID: String,
-        authToken: String?
+        authToken: String?,
+        session: URLSession = .shared
     ) async -> Bool {
         let targetID = sequenceID ?? messageID
         guard !targetID.isEmpty else { return false }
@@ -78,7 +79,7 @@ enum MessageActionService {
         }
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 Log.error("Server mark-read failed for \(topic)/\(targetID): no HTTP response")
                 return false
@@ -107,14 +108,15 @@ enum MessageActionService {
         serverURL: String,
         topic: String,
         targets: [(sequenceID: String?, messageID: String)],
-        authToken: String?
+        authToken: String?,
+        session: URLSession = .shared
     ) async -> Int {
         var synced = 0
         for target in targets {
             let ok = await markReadOnServer(
                 serverURL: serverURL, topic: topic,
                 sequenceID: target.sequenceID, messageID: target.messageID,
-                authToken: authToken
+                authToken: authToken, session: session
             )
             guard ok else {
                 Log.info("Server mark-all-read for \(topic) stopped after \(synced)/\(targets.count)")
@@ -129,11 +131,13 @@ enum MessageActionService {
     // MARK: - Message actions (view / http / copy)
 
     /// Executes an ntfy message action from the history UI.
-    static func execute(action: NtfyMessage.NtfyAction, topic: String) {
+    /// - Parameter serverURL: base URL of the server the message came from — allow-lists
+    ///   are configured per server, and the same topic name can exist on several.
+    static func execute(action: NtfyMessage.NtfyAction, serverURL: String) {
         switch action.action {
         case "view":
             guard let urlString = action.url, let url = URL(string: urlString) else { return }
-            openSecurely(url, forTopic: topic)
+            openSecurely(url, serverBaseURL: serverURL)
         case "http":
             guard let urlString = action.url, let url = URL(string: urlString) else { return }
             executeHTTP(url: url, method: action.method ?? "POST", headers: action.headers, body: action.body)
@@ -151,8 +155,8 @@ enum MessageActionService {
 
     /// Opens a URL after validating scheme/domain against the server config —
     /// same rules as NotificationManager.openUrlSecurely.
-    static func openSecurely(_ url: URL, forTopic topic: String?) {
-        let serverConfig = topic.flatMap { ConfigManager.shared.config?.serverConfig(forTopic: $0) }
+    static func openSecurely(_ url: URL, serverBaseURL: String?) {
+        let serverConfig = serverBaseURL.flatMap { ConfigManager.shared.config?.server(forURL: $0) }
 
         let schemeAllowed = serverConfig?.isSchemeAllowed(url) ?? ["http", "https"].contains(url.scheme?.lowercased() ?? "")
         guard schemeAllowed else {

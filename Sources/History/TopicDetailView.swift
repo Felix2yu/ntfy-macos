@@ -98,14 +98,18 @@ struct TopicDetailView: View {
                         ForEach(viewModel.messages) { stored in
                             MessageCardView(
                                 stored: stored,
+                                attachmentState: stored.message.attachment.flatMap { viewModel.attachmentStates[$0.url] },
                                 onToggleRead: { viewModel.toggleRead(stored) },
                                 onDelete: { viewModel.delete(stored) },
                                 onCopy: { viewModel.copyMessage(stored) },
                                 onOpenURL: { urlString in
-                                    viewModel.openURL(urlString, topic: stored.topic)
+                                    viewModel.openURL(urlString, serverURL: stored.serverURL)
                                 },
                                 onAction: { action in
-                                    viewModel.execute(action: action, topic: stored.topic)
+                                    viewModel.execute(action: action, serverURL: stored.serverURL)
+                                },
+                                onDownloadAttachment: {
+                                    viewModel.downloadAndOpen(stored)
                                 }
                             )
                             .id(stored.id)
@@ -158,37 +162,65 @@ struct TopicDetailView: View {
     private var syncStatusFooter: some View {
         let progress = viewModel.syncService.progress(for: topicRef)
         return HStack(spacing: 8) {
-            switch progress.phase {
-            case .syncing:
-                ProgressView()
-                    .controlSize(.small)
-                Text("正在从服务器同步历史…（已接收 \(progress.receivedCount) 条）")
-                    .font(.footnote)
+            if let notice = viewModel.markReadSyncNotice {
+                Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
-            case .rateLimited(let retryAfter):
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                Text("服务器限速，\(Int(retryAfter)) 秒后可重试")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            case .failed(let message):
-                Image(systemName: "xmark.octagon")
-                    .foregroundStyle(.red)
-                Text("同步失败：\(message)")
+                Text(notice)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-            case .completed(let count):
-                Image(systemName: "checkmark.circle")
-                    .foregroundStyle(.green)
-                Text("同步完成，共 \(count) 条")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            case .idle:
-                if !viewModel.hasMoreMessages && !viewModel.messages.isEmpty {
-                    Text("已加载全部本地消息")
-                        .font(.footnote)
+                    .help(notice)
+                Button {
+                    viewModel.markReadSyncNotice = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("关闭提示")
+            } else {
+                switch progress.phase {
+                case .syncing:
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在从服务器同步历史…（已接收 \(progress.receivedCount) 条）")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                case .rateLimited(let retryAfter):
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                    Text("服务器限速，\(Int(retryAfter)) 秒后可重试")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("重试") {
+                        viewModel.retrySync()
+                    }
+                    .font(.footnote)
+                    .help("立即重新同步（限速到点后也会自动重试一次）")
+                case .failed(let message):
+                    Image(systemName: "xmark.octagon")
+                        .foregroundStyle(.red)
+                    Text("同步失败：\(message)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Button("重试") {
+                        viewModel.retrySync()
+                    }
+                    .font(.footnote)
+                    .help("重新从服务器同步本主题历史")
+                case .completed(let count):
+                    Image(systemName: "checkmark.circle")
+                        .foregroundStyle(.green)
+                    Text("同步完成，共 \(count) 条")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                case .idle:
+                    if !viewModel.hasMoreMessages && !viewModel.messages.isEmpty {
+                        Text("已加载全部本地消息")
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
             Spacer()

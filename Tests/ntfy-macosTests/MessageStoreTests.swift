@@ -109,9 +109,30 @@ final class MessageStoreTests: XCTestCase {
 
         let secondPage = try await store.messages(
             serverURL: "https://s.example", topic: "alerts", limit: 4,
-            beforeTime: firstPage.last?.time
+            before: firstPage.last?.cursor
         )
         XCTAssertEqual(secondPage.map { $0.message.time }, [1005, 1004, 1003, 1002])
+    }
+
+    // audit 2.3: a page boundary landing inside a same-second burst must not skip rows.
+    func testPaginationKeepsSameSecondMessagesAcrossPages() async throws {
+        let t = 1_700_000_500
+        for index in 0..<5 {
+            try await store.upsert(makeMessage(id: "m\(index)", time: t), serverURL: "https://s.example")
+        }
+
+        var collected: [String] = []
+        var cursor: PageCursor?
+        while true {
+            let page = try await store.messages(
+                serverURL: "https://s.example", topic: "alerts", limit: 2, before: cursor
+            )
+            collected.append(contentsOf: page.map { $0.message.id })
+            guard page.count == 2, let last = page.last else { break }
+            cursor = last.cursor
+        }
+        XCTAssertEqual(Set(collected), Set(["m0", "m1", "m2", "m3", "m4"]))
+        XCTAssertEqual(collected.count, 5)  // no duplicates, no drops
     }
 
     func testMessageCount() async throws {
@@ -435,5 +456,150 @@ final class MessageStoreTests: XCTestCase {
         let bCount = try await store.messageCount(serverURL: "https://b.example", topic: "alerts")
         XCTAssertEqual(aCount, 1)
         XCTAssertEqual(bCount, 1)
+    }
+
+    // MARK: - Orphan cleanup after subscription deletion (audit 1.4)
+
+    func testDeleteTopicRemovesMessagesAndSyncState() async throws {
+        try await store.upsert(makeMessage(id: "m1"), serverURL: "https://a.example")
+        try await store.upsert(makeMessage(id: "m2", topic: "keep"), serverURL: "https://a.example")
+        try await store.setSyncedInfo(serverURL: "https://a.example", topic: "alerts", id: "m1", time: 1_700_000_000)
+
+        try await store.deleteTopic(serverURL: "https://a.example", topic: "alerts")
+
+        let alertsCount = try await store.messageCount(serverURL: "https://a.example", topic: "alerts")
+        let unreadTotal = try await store.totalUnreadCount()
+        XCTAssertEqual(alertsCount, 0)
+        XCTAssertEqual(unreadTotal, 1)  // only the kept topic counts now
+        let info = try await store.latestSyncedInfo(serverURL: "https://a.example", topic: "alerts")
+        XCTAssertNil(info?.id)
+        // Other topics on the same server are untouched.
+        let keepCount = try await store.messageCount(serverURL: "https://a.example", topic: "keep")
+        XCTAssertEqual(keepCount, 1)
+    }
+
+    func testTrackedTopicsListsStoredPairs() async throws {
+        try await store.upsert(makeMessage(id: "m1"), serverURL: "https://a.example")
+        try await store.upsert(makeMessage(id: "m2", topic: "deploy"), serverURL: "https://b.example")
+        let tracked = try await store.trackedTopics()
+        XCTAssertEqual(tracked, [
+            TopicRef(serverURL: "https://a.example", topic: "alerts"),
+            TopicRef(serverURL: "https://b.example", topic: "deploy"),
+        ])
+    }
+
+    // MARK: - Global search (audit 3.4)
+
+    func testSearchAllMatchesAcrossServersTopicsAndFields() async throws {
+        try await store.upsert(makeMessage(id: "m1", topic: "alerts", title: "磁盘告警", message: "server disk full"), serverURL: "https://a.example")
+        try await store.upsert(makeMessage(id: "m2", topic: "deploy", time: 1_700_000_050, title: "OK", message: "restart nginx"), serverURL: "https://b.example")
+        try await store.upsert(makeMessage(id: "m3", topic: "disk-usage", time: 1_700_000_060, title: "nothing", message: "nothing"), serverURL: "https://b.example")
+
+        let byBody = try await store.searchAll(query: "disk")
+        XCTAssertEqual(Set(byBody.map { $0.message.id }), ["m1", "m3"])
+        // server_url/topic come from the row, not from a caller-supplied value.
+        XCTAssertEqual(byBody.first(where: { $0.message.id == "m1" })?.serverURL, "https://a.example")
+        XCTAssertEqual(byBody.first(where: { $0.message.id == "m3" })?.topicRef, TopicRef(serverURL: "https://b.example", topic: "disk-usage"))
+
+        let byTitle = try await store.searchAll(query: "告警")
+        XCTAssertEqual(byTitle.map { $0.message.id }, ["m1"])
+
+        let byTopicName = try await store.searchAll(query: "deploy")
+        XCTAssertEqual(byTopicName.map { $0.message.id }, ["m2"])
+    }
+
+    func testSearchAllNewestFirstExcludesDeletedHonorsCursorAndLimit() async throws {
+        for i in 0..<5 {
+            try await store.upsert(makeMessage(id: "m\(i)", time: 1_700_000_000 + i, message: "hit \(i)"), serverURL: "https://a.example")
+        }
+        try await store.upsert(makeMessage(id: "gone", time: 1_700_000_100, message: "hit gone"), serverURL: "https://a.example")
+        try await store.tombstoneMessage(serverURL: "https://a.example", topic: "alerts", messageID: "gone")
+
+        let all = try await store.searchAll(query: "hit")
+        XCTAssertEqual(all.map { $0.message.id }, ["m4", "m3", "m2", "m1", "m0"])  // newest first, tombstone excluded
+
+        let older = try await store.searchAll(query: "hit", before: all[2].cursor)  // older than m2
+        XCTAssertEqual(older.map { $0.message.id }, ["m1", "m0"])
+
+        let limited = try await store.searchAll(query: "hit", limit: 2)
+        XCTAssertEqual(limited.map { $0.message.id }, ["m4", "m3"])
+    }
+
+    func testSearchAllEscapesLikeWildcards() async throws {
+        try await store.upsert(makeMessage(id: "pct", title: "note", message: "100% done"), serverURL: "https://a.example")
+        try await store.upsert(makeMessage(id: "und", title: "note", message: "100x done"), serverURL: "https://a.example")
+
+        let hits = try await store.searchAll(query: "100%")
+        XCTAssertEqual(hits.map { $0.message.id }, ["pct"])
+    }
+
+    // MARK: - Retention (audit 2.4)
+
+    private func testNow() -> Date { Date(timeIntervalSince1970: 1_700_000_000) }
+
+    func testRetentionRemovesOldReadButKeepsUnreadAndRecent() async throws {
+        let now = 1_700_000_000
+        let day = 86_400
+        try await store.upsert(makeMessage(id: "oldRead", time: now - 100 * day), serverURL: "https://s.example")
+        try await store.upsert(makeMessage(id: "oldUnread", time: now - 100 * day), serverURL: "https://s.example")
+        try await store.upsert(makeMessage(id: "freshRead", time: now - day), serverURL: "https://s.example")
+        try await store.markRead(true, serverURL: "https://s.example", topic: "alerts", messageID: "oldRead")
+        try await store.markRead(true, serverURL: "https://s.example", topic: "alerts", messageID: "freshRead")
+
+        let policy = MessageStore.RetentionPolicy(tombstoneGraceDays: 0, readRetentionDays: 90, maxReadRowsPerTopic: 0)
+        let deleted = try await store.enforceRetention(policy, now: testNow())
+        XCTAssertEqual(deleted, 1)
+
+        let remaining = try await store.messages(serverURL: "https://s.example", topic: "alerts")
+        XCTAssertEqual(Set(remaining.map { $0.message.id }), ["oldUnread", "freshRead"])
+    }
+
+    func testRetentionPhysicallyRemovesExpiredTombstonesWithinGrace() async throws {
+        try await store.upsert(makeMessage(id: "gone", time: 1_000), serverURL: "https://s.example")
+        try await store.tombstoneMessage(serverURL: "https://s.example", topic: "alerts", messageID: "gone")
+        let realNow = Date().timeIntervalSince1970
+        let policy = MessageStore.RetentionPolicy(tombstoneGraceDays: 30, readRetentionDays: 0, maxReadRowsPerTopic: 0)
+
+        // deleted_at was just stamped → still within the 30-day grace.
+        let within = try await store.enforceRetention(policy, now: Date(timeIntervalSince1970: realNow + 10 * 86_400.0))
+        XCTAssertEqual(within, 0)
+        let kept = try await store.rawRowExists(serverURL: "https://s.example", topic: "alerts", messageID: "gone")
+        XCTAssertTrue(kept)  // tombstone survives, so a poll replay cannot resurrect the message
+
+        // 31 days later the grace has lapsed.
+        let expired = try await store.enforceRetention(policy, now: Date(timeIntervalSince1970: realNow + 31 * 86_400.0))
+        XCTAssertEqual(expired, 1)
+        let removed = try await store.rawRowExists(serverURL: "https://s.example", topic: "alerts", messageID: "gone")
+        XCTAssertFalse(removed)
+    }
+
+    func testRetentionCapsReadRowsPerTopicAndNeverUnread() async throws {
+        let day = 86_400
+        for index in 1...5 {
+            try await store.upsert(makeMessage(id: "r\(index)", time: index * day), serverURL: "https://s.example")
+            try await store.markRead(true, serverURL: "https://s.example", topic: "alerts", messageID: "r\(index)")
+        }
+        try await store.upsert(makeMessage(id: "u1", time: day), serverURL: "https://s.example")
+        try await store.upsert(makeMessage(id: "u2", time: 2 * day), serverURL: "https://s.example")
+        try await store.upsert(makeMessage(id: "other", topic: "other", time: day), serverURL: "https://s.example")
+        try await store.markRead(true, serverURL: "https://s.example", topic: "other", messageID: "other")
+
+        let policy = MessageStore.RetentionPolicy(tombstoneGraceDays: 0, readRetentionDays: 0, maxReadRowsPerTopic: 3)
+        let deleted = try await store.enforceRetention(policy, now: Date(timeIntervalSince1970: Double(10 * day)))
+        XCTAssertEqual(deleted, 2)  // r1, r2 fall outside the newest-3 window; unread do not
+
+        let remaining = try await store.messages(serverURL: "https://s.example", topic: "alerts")
+        XCTAssertEqual(Set(remaining.map { $0.message.id }), ["r5", "r4", "r3", "u1", "u2"])
+        // The cap is per (server, topic) — the other topic's single row is untouched.
+        let other = try await store.messages(serverURL: "https://s.example", topic: "other")
+        XCTAssertEqual(other.map { $0.message.id }, ["other"])
+    }
+
+    func testRetentionDisabledRulesDeleteNothing() async throws {
+        try await store.upsert(makeMessage(id: "ancient", time: 1), serverURL: "https://s.example")
+        try await store.markRead(true, serverURL: "https://s.example", topic: "alerts", messageID: "ancient")
+        let policy = MessageStore.RetentionPolicy(tombstoneGraceDays: 0, readRetentionDays: 0, maxReadRowsPerTopic: 0)
+        let deleted = try await store.enforceRetention(policy, now: testNow())
+        XCTAssertEqual(deleted, 0)
     }
 }

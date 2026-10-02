@@ -23,6 +23,19 @@ final class HistorySyncService: ObservableObject {
 
     private let store: MessageStore
     private var syncingTopics: Set<TopicRef> = []
+    private var scheduledRetries: [TopicRef: Task<Void, Never>] = [:]
+    private var rateLimitAttempts: [TopicRef: Int] = [:]
+
+    /// Network seam so tests can script failures without a live server.
+    var poll: @Sendable (
+        _ serverURL: String, _ topic: String, _ since: String, _ authToken: String?,
+        _ onMessage: @escaping @Sendable (NtfyMessage) async throws -> Void,
+        _ onActionEvent: @escaping @Sendable (NtfyMessage) async throws -> Void
+    ) async throws -> NtfyPollClient.PollResult = NtfyPollClient.poll
+
+    /// audit 2.5: a rate-limited sync retries on its own once the window lapses.
+    static let autoRetryLimit = 2
+    static let maxAutoRetryDelay: TimeInterval = 300
 
     @Published var progress: [TopicRef: SyncProgress] = [:]
 
@@ -49,7 +62,31 @@ final class HistorySyncService: ObservableObject {
         await sync(ref, full: true)
     }
 
-    private func sync(_ ref: TopicRef, full: Bool) async {
+    /// Cancels any pending auto-retry and starts the sync fresh.
+    private func cancelScheduledRetry(_ ref: TopicRef) {
+        scheduledRetries[ref]?.cancel()
+        scheduledRetries[ref] = nil
+    }
+
+    private func scheduleAutoRetry(_ ref: TopicRef, after delay: TimeInterval) {
+        cancelScheduledRetry(ref)
+        let bounded = min(max(delay, 1.0), Self.maxAutoRetryDelay)
+        scheduledRetries[ref] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(bounded * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.sync(ref, full: false, autoRetry: true)
+        }
+    }
+
+    private func sync(_ ref: TopicRef, full: Bool, autoRetry: Bool = false) async {
+        if autoRetry {
+            guard (rateLimitAttempts[ref] ?? 0) < Self.autoRetryLimit else { return }
+            rateLimitAttempts[ref] = (rateLimitAttempts[ref] ?? 0) + 1
+        } else {
+            cancelScheduledRetry(ref)
+            rateLimitAttempts[ref] = 0
+        }
+
         guard !syncingTopics.contains(ref) else { return }
         syncingTopics.insert(ref)
         defer { syncingTopics.remove(ref) }
@@ -62,15 +99,15 @@ final class HistorySyncService: ObservableObject {
 
             let token = ConfigManager.shared.getAuthToken(forServer: ref.serverURL)
             let store = self.store
-            let result = try await NtfyPollClient.poll(
-                serverURL: ref.serverURL,
-                topic: ref.topic,
-                since: since,
-                authToken: token,
-                onMessage: { message in
+            let result = try await poll(
+                ref.serverURL,
+                ref.topic,
+                since,
+                token,
+                { message in
                     try await store.upsert(message, serverURL: ref.serverURL)
                 },
-                onActionEvent: { event in
+                { event in
                     try await store.applyActionEvent(event, serverURL: ref.serverURL)
                     // A replayed clear/delete also has to withdraw the banner the message
                     // left on screen — Notification Center is not part of the history store.
@@ -91,10 +128,18 @@ final class HistorySyncService: ObservableObject {
 
             Log.info("History sync done for \(ref.topic): \(result.messageCount) messages, \(result.actionEventCount) action events")
             progress[ref] = SyncProgress(phase: .completed(count: result.messageCount), receivedCount: result.messageCount)
+            rateLimitAttempts[ref] = 0
+            cancelScheduledRetry(ref)
+            if result.messageCount > 0 || result.actionEventCount > 0 {
+                // Background retries have no UI path to trigger a reload; the open
+                // window refreshes through the store-change notification instead.
+                NotificationCenter.default.post(name: .historyStoreDidChange, object: nil, userInfo: ["topicRef": ref])
+            }
         } catch let error as NtfyPollClient.PollError {
             if let retryAfter = error.retryAfter {
                 Log.error("History sync rate limited for \(ref.topic): retry after \(Int(retryAfter))s")
                 progress[ref] = SyncProgress(phase: .rateLimited(retryAfter: retryAfter), receivedCount: progress[ref]?.receivedCount ?? 0)
+                scheduleAutoRetry(ref, after: retryAfter)
             } else {
                 Log.error("History sync failed for \(ref.topic): \(error.localizedDescription)")
                 progress[ref] = SyncProgress(phase: .failed(error.localizedDescription), receivedCount: 0)
