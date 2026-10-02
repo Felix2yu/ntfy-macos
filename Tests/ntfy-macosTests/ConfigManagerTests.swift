@@ -104,17 +104,69 @@ final class ConfigManagerTests: XCTestCase {
         let manager = ConfigManager.shared
         try manager.loadConfig(from: tempConfigPath)
 
-        let alertsTopic = manager.topicConfig(for: "alerts")
+        let alertsTopic = manager.topicConfig(serverURL: "https://ntfy.sh", topic: "alerts")
         XCTAssertNotNil(alertsTopic)
         XCTAssertEqual(alertsTopic?.iconSymbol, "bell.fill")
         XCTAssertEqual(alertsTopic?.silent, true)
 
-        let newsTopic = manager.topicConfig(for: "news")
+        let newsTopic = manager.topicConfig(serverURL: "https://ntfy.sh", topic: "news")
         XCTAssertNotNil(newsTopic)
         XCTAssertEqual(newsTopic?.iconSymbol, "newspaper")
 
-        let unknownTopic = manager.topicConfig(for: "nonexistent")
+        let unknownTopic = manager.topicConfig(serverURL: "https://ntfy.sh", topic: "nonexistent")
         XCTAssertNil(unknownTopic)
+    }
+
+    /// The same topic name on different servers must resolve to each server's own config.
+    func testTopicConfigLookupIsServerScoped() throws {
+        let yaml = """
+        servers:
+          - url: https://ntfy.sh
+            topics:
+              - name: alerts
+                icon_symbol: bell.fill
+                silent: true
+          - url: https://private.example.com
+            topics:
+              - name: alerts
+                icon_symbol: exclamationmark.triangle
+        """
+        try yaml.write(toFile: tempConfigPath, atomically: true, encoding: .utf8)
+
+        let manager = ConfigManager.shared
+        try manager.loadConfig(from: tempConfigPath)
+
+        let publicAlerts = manager.topicConfig(serverURL: "https://ntfy.sh", topic: "alerts")
+        XCTAssertEqual(publicAlerts?.iconSymbol, "bell.fill")
+        XCTAssertEqual(publicAlerts?.silent, true)
+
+        let privateAlerts = manager.topicConfig(serverURL: "https://private.example.com", topic: "alerts")
+        XCTAssertEqual(privateAlerts?.iconSymbol, "exclamationmark.triangle")
+        XCTAssertNil(privateAlerts?.silent)
+
+        // Unknown server → no config, even when the topic name exists elsewhere.
+        XCTAssertNil(manager.topicConfig(serverURL: "https://other.example.com", topic: "alerts"))
+    }
+
+    func testServerLookupByURL() throws {
+        let yaml = """
+        servers:
+          - url: https://ntfy.sh
+            topics:
+              - name: alerts
+          - url: https://private.example.com
+            allowed_domains: []
+            topics:
+              - name: alerts
+        """
+        try yaml.write(toFile: tempConfigPath, atomically: true, encoding: .utf8)
+
+        let manager = ConfigManager.shared
+        try manager.loadConfig(from: tempConfigPath)
+
+        XCTAssertEqual(manager.config?.server(forURL: "https://ntfy.sh")?.allowedDomains, nil)
+        XCTAssertEqual(manager.config?.server(forURL: "https://private.example.com")?.allowedDomains, [])
+        XCTAssertNil(manager.config?.server(forURL: "https://missing.example.com"))
     }
 
     // MARK: - Sample config creation

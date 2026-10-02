@@ -9,16 +9,43 @@ struct EditableServer: Identifiable {
     var fetchMissed: Bool
     var topics: [EditableTopic]
 
+    // Server-level click-URL security options (audit 3.3): mode + raw input are the
+    // editing state, the YAML value is derived from them on save.
+    var schemesMode: URLRestriction
+    var schemesInput: String
+    var domainsMode: URLRestriction
+    var domainsInput: String
+
+    var allowedSchemes: [String]? {
+        switch schemesMode {
+        case .off: return nil
+        case .denyAll: return []
+        case .custom: return parseRestrictionList(schemesInput)
+        }
+    }
+
+    var allowedDomains: [String]? {
+        switch domainsMode {
+        case .off: return nil
+        case .denyAll: return []
+        case .custom: return parseRestrictionList(domainsInput)
+        }
+    }
+
     // Track original URL for Keychain cleanup on rename
     var originalUrl: String?
 
-    init(id: UUID = UUID(), url: String = "", token: String = "", storeInKeychain: Bool = false, fetchMissed: Bool = false, topics: [EditableTopic] = [], originalUrl: String? = nil) {
+    init(id: UUID = UUID(), url: String = "", token: String = "", storeInKeychain: Bool = false, fetchMissed: Bool = false, topics: [EditableTopic] = [], allowedSchemes: [String]? = nil, allowedDomains: [String]? = nil, originalUrl: String? = nil) {
         self.id = id
         self.url = url
         self.token = token
         self.storeInKeychain = storeInKeychain
         self.fetchMissed = fetchMissed
         self.topics = topics
+        self.schemesMode = URLRestriction(deriving: allowedSchemes)
+        self.schemesInput = (allowedSchemes ?? []).joined(separator: ", ")
+        self.domainsMode = URLRestriction(deriving: allowedDomains)
+        self.domainsInput = (allowedDomains ?? []).joined(separator: ", ")
         self.originalUrl = originalUrl
     }
 }
@@ -56,6 +83,82 @@ class SettingsViewModel: ObservableObject {
     @Published var hasUnsavedChanges: Bool = false
     @Published var saveError: String?
     @Published var serverConnectionStates: [String: StatusBarController.ConnectionState] = [:]
+
+    // MARK: - Connectivity tests (against the edited, possibly unsaved values)
+
+    enum ServerTestState: Equatable {
+        case testing
+        case reachable(version: String?)
+        case tokenRejected
+        case failed(reason: String)
+    }
+
+    enum TopicTestState: Equatable {
+        case sending
+        case success
+        case failed(reason: String)
+    }
+
+    @Published var serverTestStates: [UUID: ServerTestState] = [:]
+    @Published var topicTestStates: [UUID: TopicTestState] = [:]
+
+    /// Test seam: session used by the connectivity probes.
+    var probeSession: URLSession = .shared
+
+    func testConnection(for server: EditableServer) {
+        guard serverTestStates[server.id] != .testing else { return }
+        serverTestStates[server.id] = .testing
+        let url = server.url
+        let token = server.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        let topic = server.topics.first?.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await ConnectivityTest.testConnection(
+                serverURL: url,
+                token: token.isEmpty ? nil : token,
+                topic: topic?.isEmpty == false ? topic : nil,
+                session: self.probeSession
+            )
+            switch outcome {
+            case .serverReachable(let version):
+                self.serverTestStates[server.id] = .reachable(version: version)
+            case .tokenRejected:
+                self.serverTestStates[server.id] = .tokenRejected
+            case .unreachable(let reason):
+                self.serverTestStates[server.id] = .failed(reason: reason)
+            default:
+                self.serverTestStates[server.id] = .failed(reason: "意外的探测结果")
+            }
+        }
+    }
+
+    func sendTestNotification(in server: EditableServer, topic: EditableTopic) {
+        guard topicTestStates[topic.id] != .sending else { return }
+        topicTestStates[topic.id] = .sending
+        let url = server.url
+        let name = topic.name
+        let token = server.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await ConnectivityTest.sendTestNotification(
+                serverURL: url,
+                topic: name,
+                token: token.isEmpty ? nil : token,
+                session: self.probeSession
+            )
+            switch outcome {
+            case .published:
+                self.topicTestStates[topic.id] = .success
+            case .writeRejected(let status):
+                let hint = (status == 401 || status == 403) ? "（无写入权限或令牌错误）" : ""
+                self.topicTestStates[topic.id] = .failed(reason: "HTTP \(status)\(hint)")
+            case .unreachable(let reason):
+                self.topicTestStates[topic.id] = .failed(reason: reason)
+            default:
+                self.topicTestStates[topic.id] = .failed(reason: "意外的发送结果")
+            }
+        }
+    }
 
     func refreshConnectionStates() {
         let statuses = StatusBarController.shared.getServerStatuses()
@@ -112,6 +215,8 @@ class SettingsViewModel: ObservableObject {
                         actions: topic.actions
                     )
                 },
+                allowedSchemes: server.allowedSchemes,
+                allowedDomains: server.allowedDomains,
                 originalUrl: server.url
             )
         }
@@ -120,7 +225,7 @@ class SettingsViewModel: ObservableObject {
         saveError = nil
     }
 
-    func save() {
+    func save(to path: String? = nil) {
         saveError = nil
 
         // Validation
@@ -158,7 +263,7 @@ class SettingsViewModel: ObservableObject {
         let serverConfigs = servers.map { server in
             let topicConfigs = server.topics.map { topic in
                 TopicConfig(
-                    name: topic.name,
+                    name: topic.name.trimmingCharacters(in: .whitespacesAndNewlines),
                     iconPath: topic.iconPath,
                     iconSymbol: topic.iconSymbol,
                     autoRunScript: topic.autoRunScript,
@@ -173,14 +278,24 @@ class SettingsViewModel: ObservableObject {
             let yamlToken: String? = server.storeInKeychain ? nil : (server.token.isEmpty ? nil : server.token)
 
             return ServerConfig(
-                url: server.url,
+                url: server.url.trimmingCharacters(in: .whitespacesAndNewlines),
                 token: yamlToken,
                 topics: topicConfigs,
+                allowedSchemes: server.allowedSchemes,
+                allowedDomains: server.allowedDomains,
                 fetchMissed: server.fetchMissed ? true : nil
             )
         }
 
         let appConfig = AppConfig(servers: serverConfigs, localServerPort: port)
+
+        // Reject invalid configs before touching the Keychain or the config file.
+        do {
+            try ConfigValidator.validate(appConfig)
+        } catch {
+            saveError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            return
+        }
 
         // Handle Keychain operations
         for server in servers {
@@ -204,7 +319,7 @@ class SettingsViewModel: ObservableObject {
 
         // Write YAML
         do {
-            try ConfigManager.saveConfig(appConfig)
+            try ConfigManager.saveConfig(appConfig, to: path)
             hasUnsavedChanges = false
 
             // Update originalUrl for all servers after successful save

@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var statusTimer: Timer?
 
     @AppStorage(AppSettings.expandMessagesByDefaultKey) private var expandByDefault = false
+    @AppStorage(AppSettings.messageFontSizeKey) private var messageFontSize = 13.0
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var loginError: String?
 
@@ -60,6 +61,18 @@ struct SettingsView: View {
 
             Toggle("默认展开消息全文", isOn: $expandByDefault)
                 .help("长消息进入通知历史时即完整显示；单条仍可点击「收起」折回")
+
+            LabeledContent("消息字号") {
+                HStack(spacing: 8) {
+                    Slider(value: $messageFontSize, in: 11...20, step: 1)
+                        .frame(width: 160)
+                    Text("\(Int(messageFontSize)) pt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
+                }
+            }
+            .help("通知历史中消息正文的字体大小，Markdown 标题随字号等比缩放")
         } header: {
             Text("通用")
         }
@@ -292,12 +305,47 @@ private struct ServerRowView: View {
                 Toggle("重连时拉取错过的消息", isOn: $server.fetchMissed)
                     .foregroundStyle(.secondary)
 
+                HStack(spacing: 8) {
+                    Button {
+                        viewModel.testConnection(for: server)
+                    } label: {
+                        Label("测试连接", systemImage: "bolt.horizontal.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(server.url.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .help("按当前填写的地址与令牌探测服务器（无需先保存）")
+
+                    testResultView(viewModel.serverTestStates[server.id])
+                    Spacer()
+                }
+
+                restrictionRow(
+                    title: "允许跳转方案",
+                    offLabel: "默认 (http/https)",
+                    placeholder: "http, https, myapp",
+                    help: "限制该服务器消息可打开的 URL 方案；自定义列表留空等于全部禁止",
+                    mode: $server.schemesMode,
+                    input: $server.schemesInput
+                )
+
+                restrictionRow(
+                    title: "信任域名",
+                    offLabel: "不限制",
+                    placeholder: "*.example.com, ntfy.sh",
+                    help: "白名单：仅所列域名的链接可直接打开；*. 前缀匹配其子域；自定义列表留空等于全部禁止",
+                    mode: $server.domainsMode,
+                    input: $server.domainsInput
+                )
+
                 Divider()
 
                 ForEach($server.topics) { $topic in
-                    TopicRowView(topic: $topic) {
-                        server.topics.removeAll { $0.id == topic.id }
-                    }
+                    TopicRowView(
+                        topic: $topic,
+                        onDelete: { server.topics.removeAll { $0.id == topic.id } },
+                        testState: viewModel.topicTestStates[topic.id],
+                        onSendTest: { viewModel.sendTestNotification(in: server, topic: topic) }
+                    )
                 }
 
                 HStack {
@@ -336,6 +384,63 @@ private struct ServerRowView: View {
         }
         .sheet(isPresented: $showTokenSheet) {
             TokenSheetView(server: $server)
+        }
+    }
+
+    /// One 允许跳转方案 / 信任域名 row: mode popup plus, in custom mode, the list input.
+    private func restrictionRow(
+        title: String,
+        offLabel: String,
+        placeholder: String,
+        help: String,
+        mode: Binding<URLRestriction>,
+        input: Binding<String>
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Picker("", selection: mode) {
+                Text(offLabel).tag(URLRestriction.off)
+                Text("自定义列表").tag(URLRestriction.custom)
+                Text("全部禁止").tag(URLRestriction.denyAll)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+
+            if mode.wrappedValue == .custom {
+                TextField(placeholder, text: input)
+                    .textFieldStyle(.plain)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .help(help)
+    }
+
+    @ViewBuilder
+    private func testResultView(_ state: SettingsViewModel.ServerTestState?) -> some View {        switch state {
+        case .testing:
+            ProgressView().controlSize(.small)
+        case .reachable(let version):
+            Label(
+                version.map { "连接正常 · v\($0)" } ?? "连接正常",
+                systemImage: "checkmark.circle.fill"
+            )
+            .foregroundStyle(.green)
+            .font(.caption)
+        case .tokenRejected:
+            Label("令牌被服务器拒绝", systemImage: "key.slash")
+                .foregroundStyle(.red)
+                .font(.caption)
+        case .failed(let reason):
+            Label("连接失败：\(reason)", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .lineLimit(1)
+        case .none:
+            EmptyView()
         }
     }
 

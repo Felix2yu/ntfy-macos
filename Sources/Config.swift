@@ -173,11 +173,23 @@ struct AppConfig: Codable {
         servers.flatMap { $0.topics }
     }
 
-    /// Finds the server config that contains a given topic
-    func serverConfig(forTopic topicName: String) -> ServerConfig? {
-        return servers.first { server in
-            server.topics.contains { $0.name == topicName }
-        }
+    /// Finds the server config by its base URL. Topic behaviour must be resolved per
+    /// (server, topic) — the same topic name on different servers has different config.
+    func server(forURL url: String) -> ServerConfig? {
+        servers.first { $0.url == url }
+    }
+
+    /// Finds a topic's configuration within one specific server.
+    func topicConfig(serverURL: String, topic topicName: String) -> TopicConfig? {
+        server(forURL: serverURL)?.topics.first { $0.name == topicName }
+    }
+
+    /// Every currently subscribed (server, topic) pair; anything in the history
+    /// database outside this set is an orphan left by a deleted subscription.
+    var subscriptions: Set<TopicRef> {
+        Set(servers.flatMap { server in
+            server.topics.map { TopicRef(serverURL: server.url, topic: $0.name) }
+        })
     }
 }
 
@@ -267,11 +279,21 @@ final class ConfigManager: @unchecked Sendable {
     static let shared = ConfigManager()
     private let lock = NSLock()
     private var _config: AppConfig?
+    private var _activePath: String?
 
     var config: AppConfig? {
         lock.lock()
         defer { lock.unlock() }
         return _config
+    }
+
+    /// The file this process loaded (and therefore saves/reloads), set by `loadConfig`.
+    /// Without it a `serve --config` instance would silently fall back to the default
+    /// path on watcher reloads and Settings saves.
+    var activePath: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _activePath
     }
 
     private init() {}
@@ -284,7 +306,7 @@ final class ConfigManager: @unchecked Sendable {
 
     /// Loads configuration from the specified path or default location
     func loadConfig(from path: String? = nil) throws {
-        let configPath = path ?? ConfigManager.defaultConfigPath
+        let configPath = path ?? activePath ?? ConfigManager.defaultConfigPath
         let url = URL(fileURLWithPath: configPath)
 
         guard FileManager.default.fileExists(atPath: configPath) else {
@@ -311,6 +333,7 @@ final class ConfigManager: @unchecked Sendable {
             defer { lock.unlock() }
             self._config = decodedConfig
             self._configWarning = unknownKeysWarning
+            self._activePath = configPath
         } catch {
             throw ConfigError.decodingError(error)
         }
@@ -487,8 +510,9 @@ final class ConfigManager: @unchecked Sendable {
         return serverConfig.token
     }
 
-    /// Finds a topic configuration by name (searches all servers)
-    func topicConfig(for topicName: String) -> TopicConfig? {
-        return config?.allTopics.first { $0.name == topicName }
+    /// Finds a topic configuration for one specific server. The same topic name can
+    /// exist on several servers with different settings, so the server is part of the key.
+    func topicConfig(serverURL: String, topic topicName: String) -> TopicConfig? {
+        return config?.topicConfig(serverURL: serverURL, topic: topicName)
     }
 }

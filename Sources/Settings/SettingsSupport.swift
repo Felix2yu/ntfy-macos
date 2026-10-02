@@ -80,3 +80,26 @@ struct TokenSheetView: View {
         }
     }
 }
+
+// MARK: - Click-URL security options (audit 3.3)
+
+/// Tri-state editing model for the server-level `allowed_schemes` / `allowed_domains`
+/// options: absent (default behaviour), an explicit list, or deny-all (empty list).
+enum URLRestriction: Hashable {
+    case off
+    case custom
+    case denyAll
+
+    init(deriving list: [String]?) {
+        guard let list else { self = .off; return }
+        self = list.isEmpty ? .denyAll : .custom
+    }
+}
+
+/// Comma/semicolon/space separated input → lowercased list, empty entries dropped.
+func parseRestrictionList(_ text: String) -> [String] {
+    text.lowercased()
+        .components(separatedBy: CharacterSet(charactersIn: ",; "))
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+}

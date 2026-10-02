@@ -300,9 +300,9 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(server.isUrlAllowed(URL(string: "http://evil.com")!))     // both wrong
     }
 
-    // MARK: - AppConfig serverConfig(forTopic:) Tests
+    // MARK: - AppConfig server(forURL:) Tests
 
-    func testAppConfigServerConfigForTopic() throws {
+    func testAppConfigServerForURL() throws {
         let yaml = """
         servers:
           - url: https://server1.com
@@ -318,15 +318,15 @@ final class ConfigTests: XCTestCase {
         let decoder = YAMLDecoder()
         let config = try decoder.decode(AppConfig.self, from: yaml)
 
-        let server1 = config.serverConfig(forTopic: "topic1")
+        let server1 = config.server(forURL: "https://server1.com")
         XCTAssertEqual(server1?.url, "https://server1.com")
         XCTAssertEqual(server1?.effectiveAllowedSchemes, ["http", "https"])
 
-        let server2 = config.serverConfig(forTopic: "topic2")
+        let server2 = config.server(forURL: "https://server2.com")
         XCTAssertEqual(server2?.url, "https://server2.com")
         XCTAssertEqual(server2?.effectiveAllowedSchemes, ["https", "custom"])
 
-        let serverNone = config.serverConfig(forTopic: "nonexistent")
+        let serverNone = config.server(forURL: "https://nonexistent.com")
         XCTAssertNil(serverNone)
     }
 
@@ -369,5 +369,24 @@ final class ConfigTests: XCTestCase {
         } else {
             XCTFail("Expected insecureFilePermissions error")
         }
+    }
+
+    // MARK: - Subscriptions (audit 1.4)
+
+    func testSubscriptionsListsEveryServerTopicPair() {
+        let config = AppConfig(servers: [
+            ServerConfig(url: "https://a.example", topics: [TopicConfig(name: "alerts"), TopicConfig(name: "deploy")]),
+            ServerConfig(url: "https://b.example", topics: [TopicConfig(name: "alerts")]),
+        ])
+        XCTAssertEqual(config.subscriptions, [
+            TopicRef(serverURL: "https://a.example", topic: "alerts"),
+            TopicRef(serverURL: "https://a.example", topic: "deploy"),
+            TopicRef(serverURL: "https://b.example", topic: "alerts"),
+        ])
+    }
+
+    func testSubscriptionsEmptyWithoutTopics() {
+        let config = AppConfig(servers: [ServerConfig(url: "https://a.example", topics: [])])
+        XCTAssertTrue(config.subscriptions.isEmpty)
     }
 }

@@ -6,12 +6,19 @@ import AppKit
 struct TopicRowView: View {
     @Binding var topic: EditableTopic
     var onDelete: (() -> Void)?
+    var testState: SettingsViewModel.TopicTestState?
+    var onSendTest: (() -> Void)?
 
     @State private var isExpanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            TopicSettingsView(topic: $topic, onDelete: onDelete)
+            TopicSettingsView(
+                topic: $topic,
+                onDelete: onDelete,
+                testState: testState,
+                onSendTest: onSendTest
+            )
                 .padding(.top, 6)
         } label: {
             HStack(spacing: 6) {
@@ -80,6 +87,8 @@ struct TopicRowView: View {
 struct TopicSettingsView: View {
     @Binding var topic: EditableTopic
     var onDelete: (() -> Void)?
+    var testState: SettingsViewModel.TopicTestState?
+    var onSendTest: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -100,6 +109,22 @@ struct TopicSettingsView: View {
                 set: { topic.silent = $0 ? true : nil }
             ))
             .foregroundStyle(.secondary)
+
+            if let onSendTest {
+                HStack(spacing: 8) {
+                    Button {
+                        onSendTest()
+                    } label: {
+                        Label("发送测试通知", systemImage: "paperplane")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(topic.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .help("向该主题发布一条测试消息；已订阅的主题会随即弹出横幅（无需先保存）")
+
+                    testResultView
+                    Spacer()
+                }
+            }
 
             Divider()
 
@@ -196,6 +221,27 @@ struct TopicSettingsView: View {
                     .buttonStyle(.borderless)
                     .font(.caption)
             }
+        }
+    }
+
+    // MARK: Test notification result
+
+    @ViewBuilder
+    private var testResultView: some View {
+        switch testState {
+        case .sending:
+            ProgressView().controlSize(.small)
+        case .success:
+            Label("已发布，等待横幅", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+        case .failed(let reason):
+            Label("发送失败：\(reason)", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .lineLimit(1)
+        case .none:
+            EmptyView()
         }
     }
 
