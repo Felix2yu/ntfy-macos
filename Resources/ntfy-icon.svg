@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B9785"/>
+      <stop offset="1" stop-color="#50B7A2"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="210" fill="url(#bg)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linejoin="miter" stroke-linecap="butt">
+    <!-- bubble outline, centered at x=512; left edge runs past the bottom edge into the sharp tail tip -->
+    <path stroke-width="52" d="M 277,285 H 747 Q 777,285 777,315 V 665 Q 777,695 747,695 H 340 L 247,748 V 315 Q 247,285 277,285 Z"/>
+    <!-- > and _ share one bottom edge: chevron lower-arm butt cap reaches y=585+0.8*26=605.8, underscore center 605.8-26=579.8 -->
+    <path stroke-width="52" d="M 335,405 L 455,495 L 335,585"/>
+    <path stroke-width="52" d="M 540,579.8 H 690"/>
+  </g>
+</svg>
