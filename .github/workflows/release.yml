@@ -64,18 +64,20 @@ jobs:
           
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # The tap lives under its own owner, not alongside this repo, so it is not
+          # derived from github.repository.
           git clone https://github.com/laurentftech/homebrew-ntfy-macos.git tap
           cd tap
           
           cat > Formula/ntfy-macos.rb << 'FORMULA'
           class NtfyMacos < Formula
             desc "Native macOS CLI notifier and automation agent for ntfy"
-            homepage "https://github.com/laurentftech/ntfy-macos"
+            homepage "https://github.com/Felix2yu/ntfy-macos"
             url "SOURCE_URL_PLACEHOLDER"
             sha256 "SHA256_PLACEHOLDER"
             license "MIT"
             version "VERSION_PLACEHOLDER"
-            head "https://github.com/laurentftech/ntfy-macos.git", branch: "main"
+            head "https://github.com/Felix2yu/ntfy-macos.git", branch: "main"
           
             depends_on xcode: ["26.0", :build]
             depends_on :macos

@@ -1,12 +1,12 @@
 # ntfy-macos
 
-[![Build & Test](https://github.com/laurentftech/ntfy-macos/actions/workflows/build.yml/badge.svg)](https://github.com/laurentftech/ntfy-macos/actions/workflows/build.yml)
+[![Build & Test](https://github.com/Felix2yu/ntfy-macos/actions/workflows/build.yml/badge.svg)](https://github.com/Felix2yu/ntfy-macos/actions/workflows/build.yml)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/laurentftech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-brightgreen.svg)](https://www.apple.com/macos/)
+[![macOS 26+](https://img.shields.io/badge/macOS-26%2B-brightgreen.svg)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6-orange.svg)](https://swift.org/)
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-brown.svg)](https://github.com/laurentftech/homebrew-ntfy-macos)
-[![Tests](https://img.shields.io/badge/Tests-177-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-320-brightgreen.svg)]()
 
 在 Mac 上接收来自任何来源的推送通知——服务器、IoT 设备、智能家居、CI 流水线或自定义脚本。无需注册账号，既可使用公共 [ntfy.sh](https://ntfy.sh) 服务，也支持自建服务器。
 
@@ -50,7 +50,7 @@ brew install ntfy-macos
 
 ```bash
 # 克隆仓库
-git clone https://github.com/laurentftech/ntfy-macos.git
+git clone https://github.com/Felix2yu/ntfy-macos.git
 cd ntfy-macos
 
 # 构建 app bundle
