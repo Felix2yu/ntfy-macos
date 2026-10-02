@@ -6,10 +6,16 @@ import AppKit
 struct HistoryView: View {
     @ObservedObject var viewModel: HistoryViewModel
 
+    /// Column width to start at, read once at window creation. A stored value kept live
+    /// would let SwiftUI re-assert the column while the user is dragging the divider.
+    let initialSidebarWidth: Double
+
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+                .navigationSplitViewColumnWidth(min: SidebarWidth.min,
+                                                ideal: CGFloat(initialSidebarWidth),
+                                                max: SidebarWidth.max)
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             if let ref = viewModel.selectedTopic {
