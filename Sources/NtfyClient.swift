@@ -173,7 +173,7 @@ final class NtfyClient: NSObject, @unchecked Sendable {
 
         let topicsString = topics.joined(separator: ",")
         guard var components = URLComponents(string: serverURL) else {
-            isConnecting = false
+            failInvalidURL()
             return
         }
 
@@ -191,7 +191,7 @@ final class NtfyClient: NSObject, @unchecked Sendable {
         }
 
         guard let url = components.url else {
-            isConnecting = false
+            failInvalidURL()
             return
         }
 
@@ -222,6 +222,19 @@ final class NtfyClient: NSObject, @unchecked Sendable {
         dataTask = nil
         isConnecting = false
         buffer.removeAll()
+    }
+
+    /// The server URL can never produce a valid request URL (e.g. an incomplete "https://").
+    /// Reconnecting cannot fix that, so report the error and mark the server disconnected
+    /// instead of hanging in "connecting" forever.
+    private func failInvalidURL() {
+        isConnecting = false
+        let error = NtfyError.serverInvalidURL(url: serverURL)
+        Log.error("Invalid server URL: \(serverURL)")
+        callDelegate { delegate in
+            delegate.ntfyClient(self, didEncounterError: error)
+            delegate.ntfyClientDidDisconnect(self)
+        }
     }
 
     private func startWatchdog() {

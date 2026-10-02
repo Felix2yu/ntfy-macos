@@ -38,16 +38,57 @@ private func fatalStartup(_ message: String, details: String? = nil) -> Never {
     exit(1)
 }
 
+/// Connection-relevant identity of one NtfyClient (audit 2.2). Two configs that
+/// produce the same specs keep their connections alive; everything outside the spec
+/// (silent flags, icons, scripts, actions) must not force a reconnect.
+struct ClientSpec: Hashable {
+    let serverURL: String
+    let fetchMissed: Bool
+    let topics: [String]      // sorted — order carries no meaning for the subscription
+    let authToken: String?
+}
+
 final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
-    private var clients: [NtfyClient] = []
-    private var clientToServer: [ObjectIdentifier: String] = [:]  // Maps client to server URL
+    private var clientBySpec: [ClientSpec: NtfyClient] = [:]
+    private var clientToServer: [ObjectIdentifier: ClientSpec] = [:]  // which spec drove each client
+    private var connectedSpecs: Set<ClientSpec> = []  // audit 2.6: per-connection state
     private var notificationManager: NotificationManager?
     private let scriptRunner = ScriptRunner()
     private var configWatcher: ConfigWatcher?
     private var localServer: LocalNotificationServer?
+    private var localServerPort: UInt16?
     private var messageStore: MessageStore?
     private var badgeSync: UnreadBadgeSync?
     private var historySync: HistorySyncService?
+
+    /// Builds the desired client specs from a config: one per (server, fetch_missed group).
+    static func clientSpecs(for config: AppConfig, authToken: (String) -> String?) -> [ClientSpec] {
+        var specs: [ClientSpec] = []
+        for server in config.servers {
+            guard !server.topics.isEmpty else { continue }
+            let token = authToken(server.url)
+            let grouped = Dictionary(grouping: server.topics) {
+                $0.fetchMissed ?? server.shouldFetchMissed
+            }
+            for (fetchMissed, topics) in grouped where !topics.isEmpty {
+                specs.append(ClientSpec(
+                    serverURL: server.url,
+                    fetchMissed: fetchMissed,
+                    topics: topics.map(\.name).sorted(),
+                    authToken: token
+                ))
+            }
+        }
+        return specs
+    }
+
+    /// audit 2.6: a server split across several SSE connections (one per fetch_missed
+    /// group) is shown connected only while every one of its connections is up —
+    /// keying the menu bar on the URL alone let the callbacks overwrite each other.
+    static func serverConnected(serverURL: String, allSpecs: Set<ClientSpec>, connectedSpecs: Set<ClientSpec>) -> Bool {
+        let forServer = allSpecs.filter { $0.serverURL == serverURL }
+        return !forServer.isEmpty && forServer.isSubset(of: connectedSpecs)
+    }
 
     init() {
         // Don't initialize notificationManager here - wait until it's needed
@@ -81,9 +122,51 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
                 self.badgeSync = badgeSync
             }
             Log.info("History database opened at \(MessageStore.defaultDatabasePath)")
+            scheduleHistoryRetention(store: store)
         } catch {
             // History is an enhancement; the notification service must keep working without it.
             Log.error("Failed to open history database (history disabled): \(error)")
+        }
+    }
+
+    /// Trims expired history once per day (audit 2.4). The delete is bounded by
+    /// `RetentionPolicy`; VACUUM only runs when something was actually removed.
+    private func scheduleHistoryRetention(store: MessageStore) {
+        Task {
+            let lastKey = "historyLastRetentionRun"
+            let now = Date()
+            if let last = UserDefaults.standard.object(forKey: lastKey) as? TimeInterval,
+               Calendar.current.isDate(Date(timeIntervalSince1970: last), inSameDayAs: now) {
+                return
+            }
+            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: lastKey)
+            do {
+                let deleted = try await store.enforceRetention()
+                guard deleted > 0 else { return }
+                try await store.vacuum()
+                Log.info("History retention: removed \(deleted) expired rows")
+                NotificationCenter.default.post(name: .historyStoreDidChange, object: nil)
+            } catch {
+                Log.error("History retention failed: \(error)")
+            }
+        }
+    }
+
+    /// Removes history of topics that are no longer subscribed (audit 1.4): without this,
+    /// a deleted subscription's unread rows keep the menu bar badge lit with no UI left
+    /// that could ever clear them.
+    private func pruneOrphanedHistory() {
+        guard let store = messageStore, let config = ConfigManager.shared.config else { return }
+        let subscribed = config.subscriptions
+        Task {
+            let tracked = (try? await store.trackedTopics()) ?? []
+            let orphans = tracked.subtracting(subscribed)
+            guard !orphans.isEmpty else { return }
+            for ref in orphans {
+                Log.info("Removing history of deleted subscription \(ref.serverURL)/\(ref.topic)")
+                try? await store.deleteTopic(serverURL: ref.serverURL, topic: ref.topic)
+            }
+            NotificationCenter.default.post(name: .historyStoreDidChange, object: nil)
         }
     }
 
@@ -127,6 +210,7 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
 
         // Open the history database and wire the history window
         setupHistoryStore()
+        pruneOrphanedHistory()
 
         // Start watching config file for changes
         configWatcher = ConfigWatcher(configPath: configPath)
@@ -189,90 +273,77 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
     private func connectClients() {
         guard let config = ConfigManager.shared.config else { return }
 
-        // Start local notification server if configured
-        if let port = config.localServerPort {
-            localServer?.stop()
-            localServer = LocalNotificationServer(port: port)
-            do {
-                try localServer?.start()
-            } catch {
-                Log.error("Failed to start local notification server on port \(port): \(error)")
-            }
-        } else {
+        // Local notification server only restarts when its port actually changed.
+        if localServerPort != config.localServerPort {
+            localServerPort = config.localServerPort
             localServer?.stop()
             localServer = nil
+            if let port = config.localServerPort {
+                localServer = LocalNotificationServer(port: port)
+                do {
+                    try localServer?.start()
+                } catch {
+                    Log.error("Failed to start local notification server on port \(port): \(error)")
+                }
+            }
         }
 
-        // Initialize status bar with server info
+        // Update the menu bar server list while keeping untouched servers' state.
         let serverInfos = config.servers.map { server in
             (url: server.url, topics: server.topics.map { $0.name })
         }
         Task { @MainActor in
-            StatusBarController.shared.initializeServers(servers: serverInfos)
+            StatusBarController.shared.updateServers(servers: serverInfos)
         }
 
-        // Create clients for each server, grouping topics by fetch_missed setting
-        for serverConfig in config.servers {
-            guard !serverConfig.topics.isEmpty else { continue }
+        // Diff desired against live clients: only removed/changed connections drop,
+        // only new ones connect (audit 2.2).
+        let desired = Set(Self.clientSpecs(for: config, authToken: {
+            ConfigManager.shared.getAuthToken(forServer: $0)
+        }))
+        let existing = Set(clientBySpec.keys)
 
-            let authToken = ConfigManager.shared.getAuthToken(forServer: serverConfig.url)
+        for spec in existing.subtracting(desired) {
+            guard let client = clientBySpec.removeValue(forKey: spec) else { continue }
+            clientToServer.removeValue(forKey: ObjectIdentifier(client))
+            connectedSpecs.remove(spec)
+            Log.info("Disconnecting client for \(spec.serverURL) (fetch_missed: \(spec.fetchMissed)) — config removed or changed")
+            client.disconnect()
+            refreshServerConnectivity(for: spec)
+        }
 
-            // Group topics by their fetch_missed setting (topic-level overrides server-level)
-            let topicsWithFetchMissed = serverConfig.topics.filter { topic in
-                topic.fetchMissed ?? serverConfig.shouldFetchMissed
-            }.map { $0.name }
+        for spec in desired.subtracting(existing) {
+            Log.info("Creating client for \(spec.serverURL) (fetch_missed: \(spec.fetchMissed), topics: \(spec.topics.joined(separator: ", ")))...")
+            let client = NtfyClient(
+                serverURL: spec.serverURL,
+                topics: spec.topics,
+                authToken: spec.authToken,
+                fetchMissed: spec.fetchMissed
+            )
+            client.delegate = self
+            clientBySpec[spec] = client
+            clientToServer[ObjectIdentifier(client)] = spec
+            client.connect()
+        }
+    }
 
-            let topicsWithoutFetchMissed = serverConfig.topics.filter { topic in
-                !(topic.fetchMissed ?? serverConfig.shouldFetchMissed)
-            }.map { $0.name }
-
-            // Create client for topics that need fetch_missed
-            if !topicsWithFetchMissed.isEmpty {
-                Log.info("Creating client for \(serverConfig.url) (fetch_missed: true, topics: \(topicsWithFetchMissed.joined(separator: ", ")))...")
-                let client = NtfyClient(
-                    serverURL: serverConfig.url,
-                    topics: topicsWithFetchMissed,
-                    authToken: authToken,
-                    fetchMissed: true
-                )
-                client.delegate = self
-                self.clients.append(client)
-                self.clientToServer[ObjectIdentifier(client)] = serverConfig.url
-                client.connect()
-            }
-
-            // Create client for topics that don't need fetch_missed
-            if !topicsWithoutFetchMissed.isEmpty {
-                Log.info("Creating client for \(serverConfig.url) (fetch_missed: false, topics: \(topicsWithoutFetchMissed.joined(separator: ", ")))...")
-                let client = NtfyClient(
-                    serverURL: serverConfig.url,
-                    topics: topicsWithoutFetchMissed,
-                    authToken: authToken,
-                    fetchMissed: false
-                )
-                client.delegate = self
-                self.clients.append(client)
-                self.clientToServer[ObjectIdentifier(client)] = serverConfig.url
-                client.connect()
-            }
+    /// Recomputes and publishes the aggregate connection state of one server.
+    private func refreshServerConnectivity(for spec: ClientSpec) {
+        let connected = Self.serverConnected(
+            serverURL: spec.serverURL,
+            allSpecs: Set(clientBySpec.keys),
+            connectedSpecs: connectedSpecs
+        )
+        Task { @MainActor in
+            StatusBarController.shared.setServerConnected(spec.serverURL, connected: connected)
         }
     }
 
     func reloadConfig() {
         Log.info("Reloading configuration...")
 
-        // Stop local server
-        localServer?.stop()
-        localServer = nil
-
-        // Disconnect all clients
-        for client in clients {
-            client.disconnect()
-        }
-        clients.removeAll()
-        clientToServer.removeAll()
-
-        // Reload config file
+        // Reload config file. On failure the existing connections stay untouched —
+        // a broken edit must not take a working service offline.
         do {
             try ConfigManager.shared.loadConfig(from: nil)
             DispatchQueue.main.async {
@@ -303,18 +374,25 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
             let topics = server.topics.map { $0.name }.joined(separator: ", ")
             Log.info("  - \(server.url): \(topics)")
         }
+        pruneOrphanedHistory()
+        if let store = messageStore {
+            scheduleHistoryRetention(store: store)  // daily gate inside
+        }
 
-        // Reconnect with new config
+        // Reconcile connections with the new config
         startService()
     }
 
     func ntfyClient(_ client: NtfyClient, didReceiveMessage message: NtfyMessage) {
         Log.info("📩 Received message on topic '\(message.topic)': \(message.message ?? "")")
 
-        let topicConfig = ConfigManager.shared.topicConfig(for: message.topic)
+        let serverURL = clientToServer[ObjectIdentifier(client)]?.serverURL
+        let topicConfig = serverURL.flatMap {
+            ConfigManager.shared.topicConfig(serverURL: $0, topic: message.topic)
+        }
 
         // Persist to the history store (if available)
-        if let store = messageStore, let serverURL = clientToServer[ObjectIdentifier(client)] {
+        if let store = messageStore, let serverURL {
             Task {
                 try? await store.upsert(message, serverURL: serverURL)
                 NotificationCenter.default.post(
@@ -346,13 +424,13 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
         }
 
         // Show notification (respects silent flag)
-        ensureNotificationManager().showNotification(for: message, topicConfig: topicConfig)
+        ensureNotificationManager().showNotification(for: message, topicConfig: topicConfig, serverURL: serverURL)
     }
 
     /// Handles server-side "message_delete" (gone) / "message_clear" (marked read)
     /// events by applying them to the matching row in the local history store.
     func ntfyClient(_ client: NtfyClient, didReceiveActionEvent event: NtfyMessage) {
-        guard let store = messageStore, let serverURL = clientToServer[ObjectIdentifier(client)] else { return }
+        guard let store = messageStore, let serverURL = clientToServer[ObjectIdentifier(client)]?.serverURL else { return }
 
         Task {
             try? await store.applyActionEvent(event, serverURL: serverURL)
@@ -374,22 +452,20 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
     }
 
     func ntfyClientDidConnect(_ client: NtfyClient) {
-        if let serverUrl = clientToServer[ObjectIdentifier(client)] {
-            Log.success("Connected to \(serverUrl)")
-            Task { @MainActor in
-                StatusBarController.shared.setServerConnected(serverUrl, connected: true)
-            }
+        if let spec = clientToServer[ObjectIdentifier(client)] {
+            Log.success("Connected to \(spec.serverURL)")
+            connectedSpecs.insert(spec)
+            refreshServerConnectivity(for: spec)
         } else {
             Log.success("Connected to ntfy server")
         }
     }
 
     func ntfyClientDidDisconnect(_ client: NtfyClient) {
-        if let serverUrl = clientToServer[ObjectIdentifier(client)] {
-            Log.info("Disconnected from \(serverUrl)")
-            Task { @MainActor in
-                StatusBarController.shared.setServerConnected(serverUrl, connected: false)
-            }
+        if let spec = clientToServer[ObjectIdentifier(client)] {
+            Log.info("Disconnected from \(spec.serverURL)")
+            connectedSpecs.remove(spec)
+            refreshServerConnectivity(for: spec)
         } else {
             Log.info("Disconnected from ntfy server")
         }

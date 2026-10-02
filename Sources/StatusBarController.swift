@@ -5,6 +5,7 @@ class StatusBarController: NSObject {
     private var statusItem: NSStatusItem?
     private var menu: NSMenu?
     private var statusMenuItem: NSMenuItem?
+    private var pauseMenuItem: NSMenuItem?
     private var serversSubmenu: NSMenu?
     private var errorMenuItem: NSMenuItem?
     private var aboutWindow: NSWindow?
@@ -84,6 +85,13 @@ class StatusBarController: NSObject {
 
         menu?.addItem(NSMenuItem.separator())
 
+        let pauseItem = NSMenuItem(title: "暂停通知", action: #selector(togglePauseNotifications), keyEquivalent: "p")
+        pauseItem.target = self
+        pauseItem.state = NotificationPause.shared.isPaused ? .on : .off
+        pauseItem.toolTip = "暂停横幅通知；消息仍会写入历史并计入未读"
+        menu?.addItem(pauseItem)
+        pauseMenuItem = pauseItem
+
         // ⇧⌘H / ⇧⌘L keep ⌘H (隐藏应用) and ⌘L free for the app's main menu
         let historyItem = NSMenuItem(title: "通知历史…", action: #selector(openHistory), keyEquivalent: "h")
         historyItem.keyEquivalentModifierMask = [.command, .shift]
@@ -143,6 +151,13 @@ class StatusBarController: NSObject {
 
     @objc func reloadConfig() {
         onReloadConfig?()
+    }
+
+    @objc func togglePauseNotifications() {
+        let paused = NotificationPause.shared.toggle()
+        pauseMenuItem?.state = paused ? .on : .off
+        Log.info(paused ? "通知横幅已暂停" : "通知横幅已恢复")
+        refreshMainStatus()
     }
 
     @objc func viewLogs() {
@@ -309,25 +324,35 @@ class StatusBarController: NSObject {
     }
 
     /// Initialize server tracking from config
-    func initializeServers(servers: [(url: String, topics: [String])]) {
+    /// Applies a new server list while keeping the connection state of servers that
+    /// stayed subscribed — used by the incremental config reload (audit 2.2), where
+    /// untouched connections must not blink back to "connecting".
+    func updateServers(servers: [(url: String, topics: [String])]) {
         stopConnectingAnimation()
-        serverStatuses.removeAll()
+        var updated: [String: ServerConnectionStatus] = [:]
         for server in servers {
-            serverStatuses[server.url] = ServerConnectionStatus(
-                url: server.url,
-                topics: server.topics,
-                isConnected: false,
-                hasEverConnected: false
-            )
+            if let existing = serverStatuses[server.url] {
+                updated[server.url] = ServerConnectionStatus(
+                    url: existing.url, topics: server.topics,
+                    isConnected: existing.isConnected,
+                    hasEverConnected: existing.hasEverConnected,
+                    hasFailedAttempt: existing.hasFailedAttempt
+                )
+            } else {
+                updated[server.url] = ServerConnectionStatus(
+                    url: server.url, topics: server.topics,
+                    isConnected: false, hasEverConnected: false
+                )
+            }
         }
+        serverStatuses = updated
         refreshServersSubmenu()
         refreshMainStatus()
         startConnectingAnimationIfNeeded()
     }
 
     /// Update connection status for a specific server
-    func setServerConnected(_ serverUrl: String, connected: Bool) {
-        if var status = serverStatuses[serverUrl] {
+    func setServerConnected(_ serverUrl: String, connected: Bool) {        if var status = serverStatuses[serverUrl] {
             status.isConnected = connected
             if connected {
                 status.hasEverConnected = true
@@ -382,7 +407,13 @@ class StatusBarController: NSObject {
     }
 
     private func updateMenuBarIcon(hasDisconnected: Bool) {
-        let symbolName = hasDisconnected ? "bell" : "bell.fill"
+        // A pause outranks the connection state on the bell itself.
+        let symbolName: String
+        if NotificationPause.shared.isPaused {
+            symbolName = "bell.slash.fill"
+        } else {
+            symbolName = hasDisconnected ? "bell" : "bell.fill"
+        }
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "ntfy") {
             image.isTemplate = true
             statusItem?.button?.image = image
@@ -464,6 +495,19 @@ class StatusBarController: NSObject {
                 attributes: textAttrs
             ))
             statusMenuItem?.attributedTitle = attributedTitle
+        }
+
+        // A pause must be visible without opening the menu.
+        if NotificationPause.shared.isPaused, let item = statusMenuItem, let current = item.attributedTitle {
+            let combined = NSMutableAttributedString(attributedString: current)
+            combined.append(NSAttributedString(
+                string: " · 通知已暂停",
+                attributes: [
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                    .font: NSFont.systemFont(ofSize: 13)
+                ]
+            ))
+            item.attributedTitle = combined
         }
     }
 

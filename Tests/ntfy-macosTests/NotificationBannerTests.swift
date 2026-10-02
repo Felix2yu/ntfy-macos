@@ -16,4 +16,22 @@ final class NotificationBannerTests: XCTestCase {
             NotificationManager.identifier(forMessageID: "xyz789")
         )
     }
+
+    // MARK: - Priority handling (audit 1.5)
+
+    func testMinPriorityIsSuppressed() {
+        XCTAssertEqual(NotificationManager.priorityHandling(for: 1), .suppressed)
+        XCTAssertEqual(NotificationManager.priorityHandling(for: 0), .suppressed)
+    }
+
+    func testLowPriorityIsPassive() {
+        XCTAssertEqual(NotificationManager.priorityHandling(for: 2), .passive)
+    }
+
+    func testDefaultAndHighPrioritiesAreNormal() {
+        XCTAssertEqual(NotificationManager.priorityHandling(for: nil), .normal)
+        XCTAssertEqual(NotificationManager.priorityHandling(for: 3), .normal)
+        XCTAssertEqual(NotificationManager.priorityHandling(for: 4), .normal)
+        XCTAssertEqual(NotificationManager.priorityHandling(for: 5), .normal)
+    }
 }

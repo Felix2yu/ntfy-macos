@@ -90,6 +90,35 @@ final class NtfyClientTests: XCTestCase {
         XCTAssertNotNil(client)
     }
 
+    // MARK: - Invalid URL
+
+    /// A server URL that can never build a request (e.g. contains a space) must
+    /// surface an error instead of hanging in "connecting" forever.
+    func testConnectWithInvalidURLReportsErrorAndDisconnects() {
+        let client = NtfyClient(serverURL: "http://exa mple.com", topics: ["test"])
+        let delegate = MockNtfyDelegate()
+        client.delegate = delegate
+
+        let errorExp = expectation(description: "didEncounterError")
+        let disconnectExp = expectation(description: "didDisconnect")
+        var received: Error?
+        delegate.onError = { error in
+            received = error
+            errorExp.fulfill()
+        }
+        delegate.onDisconnect = { disconnectExp.fulfill() }
+        delegate.onConnect = { XCTFail("must not report connect") }
+
+        client.connect()
+
+        wait(for: [errorExp, disconnectExp], timeout: 2.0)
+        let ntfyError = received as? NtfyError
+        guard case NtfyError.serverInvalidURL(let url)? = ntfyError else {
+            return XCTFail("expected serverInvalidURL, got \(String(describing: received))")
+        }
+        XCTAssertEqual(url, "http://exa mple.com")
+    }
+
     // MARK: - Exponential Backoff Calculation
 
     func testExponentialBackoffCalculation() {

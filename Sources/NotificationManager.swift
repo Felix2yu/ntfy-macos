@@ -20,6 +20,22 @@ final class NotificationManager: NSObject, @unchecked Sendable {
     /// Single banner that replaces the flood while a message storm is in progress.
     static let burstSummaryIdentifier = "ntfy:burst-summary"
 
+    /// How ntfy's message priority decides banner delivery, mirroring the mobile
+    /// clients: 1 (min) never interrupts, 2 (low) arrives quietly.
+    enum PriorityHandling: Equatable {
+        case suppressed   // priority <= 1: history only, no banner at all
+        case passive      // priority == 2: banner without sound, outside the burst throttle
+        case normal
+    }
+
+    static func priorityHandling(for priority: Int?) -> PriorityHandling {
+        switch priority ?? 3 {
+        case ...1: return .suppressed
+        case 2: return .passive
+        default: return .normal
+        }
+    }
+
     private override init() {
         super.init()
         // Don't call clearCategories() here - it accesses UNUserNotificationCenter
@@ -134,18 +150,45 @@ final class NotificationManager: NSObject, @unchecked Sendable {
     /// During a message storm, individual banners are folded into one summary notification —
     /// hundreds of sound-bearing banners in a few seconds freeze notification center and its
     /// sound queue survives app exit.
-    func showNotification(for message: NtfyMessage, topicConfig: TopicConfig?) {
+    /// - Parameter serverURL: base URL of the server the message arrived on; the topic
+    ///   config is resolved per (server, topic) because the same name can exist on several servers.
+    func showNotification(for message: NtfyMessage, topicConfig: TopicConfig?, serverURL: String? = nil) {
+        // Menu-bar pause suppresses every banner path, and returns before the throttle
+        // registers the message: a paused catch-up must not ignite a burst summary
+        // on resume.
+        if NotificationPause.shared.isPaused {
+            Log.info("Notifications paused: suppressing banner for \(message.topic)/\(message.id)")
+            return
+        }
+
         // Skip notification if silent mode is enabled
         if topicConfig?.silent == true {
             print("Silent notification for topic \(message.topic) - skipping display")
             return
         }
 
+        // Priority 1/2 messages are delivered passively (audit 1.5): they never join
+        // the burst throttle, so a low-priority catch-up cannot inflate the summary.
+        switch Self.priorityHandling(for: message.priority) {
+        case .suppressed:
+            Log.info("Min-priority message suppressed: \(message.topic)/\(message.id)")
+            return
+        case .passive:
+            if let topicConfig {
+                showTopicNotification(for: message, topicConfig: topicConfig, serverURL: serverURL, passive: true)
+            } else {
+                showBasicNotification(for: message, passive: true)
+            }
+            return
+        case .normal:
+            break
+        }
+
         let identifier = Self.identifier(forMessageID: message.id)
         switch throttle.register(topic: message.topic, priority: message.priority, identifier: identifier) {
         case .individual:
             if let topicConfig {
-                showTopicNotification(for: message, topicConfig: topicConfig)
+                showTopicNotification(for: message, topicConfig: topicConfig, serverURL: serverURL)
             } else {
                 showBasicNotification(for: message)
             }
@@ -190,17 +233,22 @@ final class NotificationManager: NSObject, @unchecked Sendable {
         }
     }
 
-    private func showTopicNotification(for message: NtfyMessage, topicConfig: TopicConfig) {
+    private func showTopicNotification(for message: NtfyMessage, topicConfig: TopicConfig, serverURL: String?, passive: Bool = false) {
         let content = UNMutableNotificationContent()
         let emojiPrefix = EmojiTags.emojiPrefix(for: message.tags)
         // Use plain text versions to strip markdown syntax (macOS notifications don't render markdown)
         content.title = emojiPrefix + (message.plainTextTitle ?? message.title ?? "\(message.topic)")
         content.body = message.plainTextMessage ?? message.message ?? "\(message.topic)"
-        // Use Glass sound to distinguish from other notification services
-        content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
+        if passive {
+            content.interruptionLevel = .passive
+            content.sound = nil
+        } else {
+            // Use Glass sound to distinguish from other notification services
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
+        }
 
         // Map ntfy priority to interruption levels
-        if let priority = message.priority {
+        if !passive, let priority = message.priority {
             switch priority {
             case 5:
                 content.interruptionLevel = .critical
@@ -214,12 +262,6 @@ final class NotificationManager: NSObject, @unchecked Sendable {
 
         if let attachment = createIconAttachment(from: topicConfig) {
             content.attachments = [attachment]
-        }
-
-        // Store message body and actions for handling
-        // Find server config for this topic to enable click-to-open-web
-        let serverConfig = ConfigManager.shared.config?.servers.first { server in
-            server.topics.contains { $0.name == message.topic }
         }
 
         // Determine click URL. Priority order:
@@ -246,7 +288,7 @@ final class NotificationManager: NSObject, @unchecked Sendable {
                 isCustomClickUrl = true
             } else {
                 // 3. Fallback: default server URL
-                clickUrl = serverConfig?.url ?? ""
+                clickUrl = serverURL ?? ""
                 isCustomClickUrl = false
             }
         }
@@ -258,6 +300,11 @@ final class NotificationManager: NSObject, @unchecked Sendable {
             "isCustomClickUrl": isCustomClickUrl,
             "messageId": message.id
         ]
+        // Which subscription delivered this message — topic config and URL
+        // allow-lists are scoped to (server, topic), not to the name alone.
+        if let serverURL {
+            userInfo["serverBaseURL"] = serverURL
+        }
 
         // Handle actions: config actions override message actions
         if let actions = topicConfig.actions, !actions.isEmpty {
@@ -322,14 +369,19 @@ final class NotificationManager: NSObject, @unchecked Sendable {
     }
 
     /// Shows a basic notification without topic configuration
-    private func showBasicNotification(for message: NtfyMessage) {
+    private func showBasicNotification(for message: NtfyMessage, passive: Bool = false) {
         let content = UNMutableNotificationContent()
         let emojiPrefix = EmojiTags.emojiPrefix(for: message.tags)
         // Use plain text versions to strip markdown syntax (macOS notifications don't render markdown)
         content.title = emojiPrefix + (message.plainTextTitle ?? message.title ?? "ntfy-macos")
         content.body = message.plainTextMessage ?? message.message ?? ""
-        // Use Glass sound to distinguish from other notification services
-        content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
+        if passive {
+            content.interruptionLevel = .passive
+            content.sound = nil
+        } else {
+            // Use Glass sound to distinguish from other notification services
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
+        }
 
         let request = UNNotificationRequest(
             identifier: Self.identifier(forMessageID: message.id),
@@ -479,9 +531,10 @@ final class NotificationManager: NSObject, @unchecked Sendable {
     /// Opens a URL securely by validating its scheme and domain against the allowed values in server config
     /// - Parameters:
     ///   - url: The URL to open
-    ///   - topic: The topic name to look up the server config (for per-server security settings)
-    private func openUrlSecurely(_ url: URL, forTopic topic: String?) {
-        let serverConfig = topic.flatMap { ConfigManager.shared.config?.serverConfig(forTopic: $0) }
+    ///   - serverBaseURL: base URL of the server that delivered the message — the same topic
+    ///     name can exist on several servers, so the allow-list must come from the right one
+    private func openUrlSecurely(_ url: URL, serverBaseURL: String?) {
+        let serverConfig = serverBaseURL.flatMap { ConfigManager.shared.config?.server(forURL: $0) }
 
         // Validate scheme
         let isSchemeAllowed = serverConfig?.isSchemeAllowed(url) ?? ["http", "https"].contains(url.scheme?.lowercased() ?? "")
@@ -563,17 +616,19 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         }
 
         let isCustomClickUrl = userInfo["isCustomClickUrl"] as? Bool ?? false
+        let serverBaseURL = userInfo["serverBaseURL"] as? String
 
         // If custom URL, use it directly; otherwise append topic to server URL
         let webUrlString = isCustomClickUrl ? serverUrl : "\(serverUrl)/\(topic)"
         if let url = URL(string: webUrlString) {
-            openUrlSecurely(url, forTopic: topic)
+            openUrlSecurely(url, serverBaseURL: serverBaseURL)
         }
     }
 
     private func handleActionResponse(_ response: UNNotificationResponse, messageBody: String, topic: String) {
         let actionIdentifier = response.actionIdentifier
         let userInfo = response.notification.request.content.userInfo
+        let serverBaseURL = userInfo["serverBaseURL"] as? String
 
         // Check for ntfy message actions
         if actionIdentifier.hasPrefix("ntfy-action-") {
@@ -592,13 +647,14 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
                       let urlString = actionUrls[actionIdentifier],
                       let url = URL(string: urlString) {
                 Log.info("Opening URL from ntfy action: \(urlString)")
-                openUrlSecurely(url, forTopic: topic)
+                openUrlSecurely(url, serverBaseURL: serverBaseURL)
             }
             return
         }
 
         // Handle config-based actions
-        guard let topicConfig = ConfigManager.shared.topicConfig(for: topic),
+        guard let serverBaseURL,
+              let topicConfig = ConfigManager.shared.topicConfig(serverURL: serverBaseURL, topic: topic),
               let actions = topicConfig.actions else {
             return
         }
@@ -614,7 +670,7 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
                 scriptRunner?.runScript(at: path, withArgument: messageBody, extraEnv: nil)
             } else if action.type == "view", let urlString = action.url, let url = URL(string: urlString) {
                 Log.info("Opening URL from config action: \(urlString)")
-                openUrlSecurely(url, forTopic: topic)
+                openUrlSecurely(url, serverBaseURL: serverBaseURL)
             } else if action.type == "shortcut", let name = action.name {
                 Log.info("Running shortcut from config action: \(name)")
                 scriptRunner?.runShortcut(named: name, withInput: messageBody)
