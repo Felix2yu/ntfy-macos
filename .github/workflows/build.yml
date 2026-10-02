@@ -5,18 +5,18 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: macos-14
+    # Package.swift declares swift-tools-version 6.2 and targets macOS 26, so the image's
+    # default toolchain must be Xcode 26 or newer; the older images ship Xcode 16.x.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.1.app
 
       - name: Show Swift version
         run: swift --version
@@ -25,32 +25,28 @@ jobs:
         run: swift build -c release
 
       - name: Run tests
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee test-output.txt
 
       - name: Test Summary
+        if: always()
         run: |
-          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "All 177 tests passed ✓" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Test Suite | Tests |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ConfigManagerTests | 7 |" >> $GITHUB_STEP_SUMMARY
-          echo "| ConfigTests | 21 |" >> $GITHUB_STEP_SUMMARY
-          echo "| ConfigValidatorTests | 12 |" >> $GITHUB_STEP_SUMMARY
-          echo "| ConfigWatcherTests | 7 |" >> $GITHUB_STEP_SUMMARY
-          echo "| EmojiTagsTests | 8 |" >> $GITHUB_STEP_SUMMARY
-          echo "| KeychainHelperTests | 5 |" >> $GITHUB_STEP_SUMMARY
-          echo "| LocalNotificationServerTests | 10 |" >> $GITHUB_STEP_SUMMARY
-          echo "| MarkdownStripperTests | 15 |" >> $GITHUB_STEP_SUMMARY
-          echo "| NotificationActionResolverTests | 5 |" >> $GITHUB_STEP_SUMMARY
-          echo "| NtfyClientTests | 8 |" >> $GITHUB_STEP_SUMMARY
-          echo "| NtfyErrorTests | 34 |" >> $GITHUB_STEP_SUMMARY
-          echo "| NtfyIntegrationTests | 15 |" >> $GITHUB_STEP_SUMMARY
-          echo "| NtfyMessageTests | 6 |" >> $GITHUB_STEP_SUMMARY
-          echo "| RetryAfterTests | 8 |" >> $GITHUB_STEP_SUMMARY
-          echo "| ScriptRunnerTests | 16 |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Note: For code coverage, open project in Xcode and run Product → Test with Code Coverage" >> $GITHUB_STEP_SUMMARY
+          total=$(grep -oE "Executed [0-9]+ tests" test-output.txt 2>/dev/null | tail -1 | grep -oE "[0-9]+" || true)
+          failures=$(grep -oE "with [0-9]+ failure" test-output.txt 2>/dev/null | tail -1 | grep -oE "[0-9]+" || true)
+          {
+            echo "### Tests"
+            echo ""
+            echo "| Executed | Failures | Toolchain |"
+            echo "| --- | --- | --- |"
+            echo "| ${total:-not reported} | ${failures:-not reported} | $(swift --version 2>&1 | head -1) |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -f test-output.txt ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -5 test-output.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
