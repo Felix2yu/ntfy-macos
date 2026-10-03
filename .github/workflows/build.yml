@@ -24,6 +24,20 @@ jobs:
       - name: Build
         run: swift build -c release
 
+      # Bundled before the tests so a run with a failing test still leaves a runnable .app
+      # to try out. build-app.sh's own `swift build -c release` is a no-op here.
+      - name: Build app bundle
+        run: |
+          chmod +x build-app.sh
+          ./build-app.sh
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ntfyx-app
+          path: .build/release/ntfyx.app
+          if-no-files-found: error
+
       - name: Run tests
         run: |
           set -o pipefail
