@@ -22,6 +22,11 @@ final class HistoryE2ETests: XCTestCase {
         request.httpBody = body.data(using: .utf8)
         let (_, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 429 {
+            // Publishing carries on through the asserts below when the server refuses, and the
+            // empty results then crash the whole runner, so bail out as a skip instead.
+            throw XCTSkip("server rate limited publishing (HTTP 429); rerun once the budget refills")
+        }
         XCTAssertEqual(status, 200, "publish failed with HTTP \(status)")
     }
 
@@ -155,5 +160,115 @@ final class HistoryE2ETests: XCTestCase {
                 authToken: nil
             )
         }
+    }
+
+    /// The batched `/read` route is a fork extension, so the comma-separated id list has to be
+    /// proven against the real server: one request, every device ends up read.
+    func testBatchedServerMarkReadConvergesOnSecondDevice() async throws {
+        let topic = makeRandomTopic()
+        let ref = TopicRef(serverURL: Self.serverURL, topic: topic)
+        for i in 0..<3 {
+            try await Self.publish(topic: topic, title: "N\(i)", body: "body\(i)")
+        }
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let pathA = NSTemporaryDirectory() + "hist-batch-A-\(UUID().uuidString).db"
+        let storeA = try MessageStore(dbPath: pathA)
+        defer { try? FileManager.default.removeItem(atPath: pathA) }
+        await HistorySyncService(store: storeA).syncFull(ref)
+
+        let onA = try await storeA.messages(serverURL: Self.serverURL, topic: topic)
+        XCTAssertEqual(onA.count, 3)
+
+        let synced = await MessageActionService.markAllReadOnServer(
+            serverURL: Self.serverURL, topic: topic,
+            targets: onA.map { ($0.message.sequenceId, $0.message.id) },
+            authToken: nil
+        )
+        XCTAssertEqual(synced, 3, "server should accept one /<topic>/<ids>/read request")
+
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let pathB = NSTemporaryDirectory() + "hist-batch-B-\(UUID().uuidString).db"
+        let storeB = try MessageStore(dbPath: pathB)
+        defer { try? FileManager.default.removeItem(atPath: pathB) }
+        await HistorySyncService(store: storeB).syncFull(ref)
+
+        let onB = try await storeB.messages(serverURL: Self.serverURL, topic: topic)
+        XCTAssertEqual(onB.count, 3, "clear events must not delete the messages")
+        XCTAssertTrue(onB.allSatisfy(\.isRead), "every replayed clear event should mark its message read")
+
+        for message in onB {
+            await MessageActionService.deleteOnServer(
+                serverURL: Self.serverURL, topic: topic,
+                sequenceID: message.message.sequenceId, messageID: message.message.id,
+                authToken: nil
+            )
+        }
+    }
+
+    /// `/v1/topics` is what the subscribe sheet is built on: it lists the topic ids the server
+    /// still has cached messages for.
+    func testServerTopicListingIncludesPublishedTopic() async throws {
+        let topic = makeRandomTopic()
+        let ref = TopicRef(serverURL: Self.serverURL, topic: topic)
+        try await Self.publish(topic: topic, body: "discovery")
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let topics = try await MessageActionService.fetchServerTopics(
+            serverURL: Self.serverURL, authToken: nil
+        )
+        XCTAssertTrue(
+            topics.contains(topic),
+            "/v1/topics should list \(topic); got \(topics.count) topic(s)"
+        )
+
+        // Cleanup (best effort): a retired topic is gone from the listing, so drop the messages.
+        let path = NSTemporaryDirectory() + "hist-discovery-\(UUID().uuidString).db"
+        let store = try MessageStore(dbPath: path)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        await HistorySyncService(store: store).syncFull(ref)
+        let messages = try await store.messages(serverURL: Self.serverURL, topic: topic)
+        await MessageActionService.deleteAllOnServer(
+            serverURL: Self.serverURL, topic: topic,
+            targets: messages.map { ($0.message.sequenceId, $0.message.id) },
+            authToken: nil
+        )
+    }
+
+    /// Retiring a topic is a single request that purges the whole server cache, which is what
+    /// makes the messages vanish on every other device at once.
+    func testRetireTopicPurgesServerCacheForOtherDevices() async throws {
+        let topic = makeRandomTopic()
+        let ref = TopicRef(serverURL: Self.serverURL, topic: topic)
+        for i in 0..<2 {
+            try await Self.publish(topic: topic, title: "R\(i)", body: "body\(i)")
+        }
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let path = NSTemporaryDirectory() + "hist-retire-\(UUID().uuidString).db"
+        let store = try MessageStore(dbPath: path)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        await HistorySyncService(store: store).syncFull(ref)
+        let cached = try await store.messages(serverURL: Self.serverURL, topic: topic)
+        XCTAssertEqual(cached.count, 2)
+
+        let deleted: Int
+        do {
+            deleted = try await MessageActionService.retireTopic(
+                serverURL: Self.serverURL, topic: topic, authToken: nil
+            )
+        } catch let error as TopicActionError {
+            throw XCTSkip("server does not allow retiring topics: \(error)")
+        }
+        XCTAssertGreaterThanOrEqual(deleted, 0)
+
+        // A brand new device must now see nothing at all.
+        let pathB = NSTemporaryDirectory() + "hist-retire-B-\(UUID().uuidString).db"
+        let storeB = try MessageStore(dbPath: pathB)
+        defer { try? FileManager.default.removeItem(atPath: pathB) }
+        await HistorySyncService(store: storeB).syncFull(ref)
+        let onB = try await storeB.messages(serverURL: Self.serverURL, topic: topic)
+        XCTAssertTrue(onB.isEmpty, "retired topic should leave no cached messages, got \(onB.count)")
     }
 }

@@ -222,4 +222,85 @@ final class ConfigManagerTests: XCTestCase {
         try ConfigManager.createSampleConfig(at: nestedPath)
         XCTAssertTrue(FileManager.default.fileExists(atPath: nestedPath))
     }
+
+    // MARK: - Subscription writes
+
+    /// The history window's one-click subscribe rewrites one server's topic list. Everything
+    /// the user configured by hand — another server, a token, per-topic settings — has to come
+    /// back out of the file unchanged, or the browser would silently cost them their setup.
+    func testReplacingTopicsAddsOneTopicAndKeepsEverythingElse() throws {
+        let yaml = """
+        servers:
+          - url: https://ntfy.sh
+            token: secret-tok
+            topics:
+              - name: alerts
+                icon_symbol: bell.fill
+                silent: true
+          - url: https://other.example
+            topics:
+              - name: keep-me
+        """
+        try yaml.write(toFile: tempConfigPath, atomically: true, encoding: .utf8)
+        let manager = ConfigManager.shared
+        try manager.loadConfig(from: tempConfigPath)
+
+        try ConfigManager.replacingTopics(serverURL: "https://ntfy.sh") { server in
+            ServerConfig(
+                url: server.url, token: server.token,
+                topics: server.topics + [TopicConfig(name: "releases")]
+            )
+        }
+
+        try manager.loadConfig(from: tempConfigPath)
+        let ntfy = manager.config?.servers.first { $0.url == "https://ntfy.sh" }
+        XCTAssertEqual(ntfy?.topics.map(\.name), ["alerts", "releases"])
+        XCTAssertEqual(ntfy?.token, "secret-tok")
+        XCTAssertEqual(ntfy?.topics.first?.iconSymbol, "bell.fill")
+        XCTAssertEqual(ntfy?.topics.first?.silent, true)
+        XCTAssertEqual(
+            manager.config?.servers.first { $0.url == "https://other.example" }?.topics.map(\.name),
+            ["keep-me"]
+        )
+    }
+
+    /// Dropping a subscription is the same write with one entry removed.
+    func testReplacingTopicsRemovesOneTopic() throws {
+        let yaml = """
+        servers:
+          - url: https://ntfy.sh
+            topics:
+              - name: alerts
+              - name: releases
+        """
+        try yaml.write(toFile: tempConfigPath, atomically: true, encoding: .utf8)
+        let manager = ConfigManager.shared
+        try manager.loadConfig(from: tempConfigPath)
+
+        try ConfigManager.replacingTopics(serverURL: "https://ntfy.sh") { server in
+            ServerConfig(
+                url: server.url, token: server.token,
+                topics: server.topics.filter { $0.name != "alerts" }
+            )
+        }
+
+        try manager.loadConfig(from: tempConfigPath)
+        XCTAssertEqual(manager.config?.servers.first?.topics.map(\.name), ["releases"])
+    }
+
+    func testReplacingTopicsRejectsAnUnknownServer() throws {
+        let yaml = """
+        servers:
+          - url: https://ntfy.sh
+            topics:
+              - name: alerts
+        """
+        try yaml.write(toFile: tempConfigPath, atomically: true, encoding: .utf8)
+        try ConfigManager.shared.loadConfig(from: tempConfigPath)
+
+        XCTAssertThrowsError(
+            try ConfigManager.replacingTopics(serverURL: "https://gone.example") { $0 }
+        )
+        XCTAssertEqual(try String(contentsOfFile: tempConfigPath, encoding: .utf8), yaml)
+    }
 }

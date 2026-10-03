@@ -48,7 +48,7 @@ private func markReadMockSession(status: Int) -> URLSession {
 /// The database holds every catch-up message as unread, so without a global
 /// "mark everything read" the user has to clear topics one by one. These tests
 /// pin that markEverythingRead empties the unread counts locally for all topics
-/// (and deliberately does not replay thousands of clear events to the server).
+/// and publishes the mark so the other devices converge too.
 @MainActor
 final class HistoryViewModelTests: XCTestCase {
 
@@ -67,6 +67,7 @@ final class HistoryViewModelTests: XCTestCase {
         try await store.upsert(makeMessage(id: "b1", topic: "beta"), serverURL: "https://s.example")
 
         let vm = HistoryViewModel(store: store, syncService: HistorySyncService(store: store))
+        vm.serverMarkReadSession = markReadMockSession(status: 200)
         try await waitUntil { vm.totalUnread == 3 }
 
         vm.markEverythingRead()
@@ -74,6 +75,12 @@ final class HistoryViewModelTests: XCTestCase {
         try await waitUntil { vm.totalUnread == 0 }
         let counts = try await store.unreadCountsByTopic()
         XCTAssertTrue(counts.isEmpty)
+
+        // Both topics are published to the server too, so the other devices converge.
+        let syncedIDs = MarkReadMockProtocol.paths.flatMap { path in
+            path.components(separatedBy: "/")[1].components(separatedBy: ",")
+        }
+        XCTAssertEqual(Set(syncedIDs), ["a1", "a2", "b1"])
     }
 
     func testMarkEverythingReadIsNoopWhenNothingUnread() async throws {
@@ -107,12 +114,14 @@ final class HistoryViewModelTests: XCTestCase {
 
         vm.markAllRead(for: ref)
 
-        try await waitUntil { vm.markReadSyncNotice != nil }
-        let ids = MarkReadMockProtocol.paths.map { $0.components(separatedBy: "/")[1] }
-        XCTAssertEqual(ids.count, HistoryViewModel.serverMarkReadCap)
-        XCTAssertEqual(ids.first, "msg\(count - 1)")  // newest first
-        XCTAssertFalse(ids.contains("msg0"))          // oldest stayed local-only
-        XCTAssertTrue(vm.markReadSyncNotice!.contains("限速保护"))
+        try await waitUntil { vm.serverSyncNotice != nil }
+        let chunks = MarkReadMockProtocol.paths.map { $0.components(separatedBy: "/")[1] }
+        // Packaged, not one request per message: the cap is 500 ids in chunks of 50.
+        XCTAssertEqual(chunks.count, HistoryViewModel.serverMarkReadCap / MessageActionService.sequenceIDsPerRequest)
+        XCTAssertEqual(chunks.flatMap { $0.components(separatedBy: ",") }.count, HistoryViewModel.serverMarkReadCap)
+        XCTAssertTrue(chunks[0].hasPrefix("msg\(count - 1),"))  // newest first
+        XCTAssertFalse(chunks.contains { $0.split(separator: ",").contains("msg0") })  // oldest stayed local-only
+        XCTAssertTrue(vm.serverSyncNotice!.contains("限速保护"))
 
         // Locally everything is read regardless of the cap.
         let counts = try await store.unreadCountsByTopic()
@@ -131,9 +140,14 @@ final class HistoryViewModelTests: XCTestCase {
 
         vm.markAllRead(for: ref)
 
-        try await waitUntil { MarkReadMockProtocol.paths.count == 3 }
+        try await waitUntil { MarkReadMockProtocol.paths.count == 1 }
+        let synced = Set(
+            MarkReadMockProtocol.paths.first!.components(separatedBy: "/")[1]
+                .components(separatedBy: ",")
+        )
+        XCTAssertEqual(synced, ["msg0", "msg1", "msg2"])
         try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertNil(vm.markReadSyncNotice)  // full success needs no explanation
+        XCTAssertNil(vm.serverSyncNotice)  // full success needs no explanation
     }
 
     func testMarkAllReadReportsFirstServerRejection() async throws {
@@ -148,13 +162,88 @@ final class HistoryViewModelTests: XCTestCase {
 
         vm.markAllRead(for: ref)
 
-        try await waitUntil { vm.markReadSyncNotice != nil }
+        try await waitUntil { vm.serverSyncNotice != nil }
         XCTAssertEqual(MarkReadMockProtocol.paths.count, 1)  // stopped at the first rejection
-        XCTAssertTrue(vm.markReadSyncNotice!.contains("0/3"))
+        XCTAssertTrue(vm.serverSyncNotice!.contains("0/3"))
 
         // Rejection does not roll back the local read state.
         let counts = try await store.unreadCountsByTopic()
         XCTAssertTrue(counts.isEmpty)
+    }
+
+    // MARK: - Clear topic on the server
+
+    /// "清空" used to be local-only, so the messages stayed on every other device. The
+    /// destructive action now has a server variant; the plain one must stay local.
+    func testClearTopicIsLocalOnlyByDefault() async throws {
+        let store = try MessageStore.inMemory()
+        let ref = TopicRef(serverURL: "https://s.example", topic: "alpha")
+        try await store.upsert(makeMessage(id: "m1", topic: "alpha"), serverURL: ref.serverURL)
+
+        let vm = HistoryViewModel(store: store, syncService: HistorySyncService(store: store))
+        vm.serverMarkReadSession = markReadMockSession(status: 200)
+
+        vm.clearTopic(ref)
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(MarkReadMockProtocol.paths.isEmpty)
+        let live = try await store.messages(serverURL: ref.serverURL, topic: "alpha")
+        XCTAssertTrue(live.isEmpty)
+    }
+
+    func testClearTopicOnServerDeletesEveryMessage() async throws {
+        let store = try MessageStore.inMemory()
+        let ref = TopicRef(serverURL: "https://s.example", topic: "alpha")
+        for i in 0..<3 {
+            try await store.upsert(
+                makeMessage(id: "msg\(i)", topic: "alpha", time: 1_700_000_000 + i),
+                serverURL: ref.serverURL
+            )
+        }
+
+        let vm = HistoryViewModel(store: store, syncService: HistorySyncService(store: store))
+        vm.serverMarkReadSession = markReadMockSession(status: 200)
+
+        vm.clearTopic(ref, withServer: true)
+
+        // The delete route takes one id per request, so three messages mean three requests.
+        try await waitUntil { MarkReadMockProtocol.paths.count == 3 }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertNil(vm.serverSyncNotice)
+    }
+
+    func testClearTopicOnServerReportsRejection() async throws {
+        let store = try MessageStore.inMemory()
+        let ref = TopicRef(serverURL: "https://s.example", topic: "alpha")
+        try await store.upsert(makeMessage(id: "msg0", topic: "alpha"), serverURL: ref.serverURL)
+
+        let vm = HistoryViewModel(store: store, syncService: HistorySyncService(store: store))
+        vm.serverMarkReadSession = markReadMockSession(status: 403)
+
+        vm.clearTopic(ref, withServer: true)
+
+        try await waitUntil { vm.serverSyncNotice != nil }
+        XCTAssertTrue(vm.serverSyncNotice!.contains("0/1"))
+    }
+
+    // MARK: - Server topic browser
+
+    func testBrowserEntriesClassifyLiveAndSubscribedTopics() {
+        let entries = HistoryViewModel.browserEntries(
+            serverURL: "https://s.example",
+            live: ["releases", "alerts"],
+            subscribed: ["alerts", "private-stuff"]
+        )
+        XCTAssertEqual(entries.map(\.topic), ["alerts", "releases", "private-stuff"])
+        XCTAssertEqual(entries.map(\.status), [.subscribed, .available, .goneOnServer])
+    }
+
+    func testBrowserEntriesKeepsServerWithoutCachedMessagesEmpty() {
+        let entries = HistoryViewModel.browserEntries(
+            serverURL: "https://s.example", live: [], subscribed: ["alerts"]
+        )
+        XCTAssertEqual(entries.map(\.topic), ["alerts"])
+        XCTAssertEqual(entries.first?.status, .goneOnServer)
     }
 
     // MARK: - Global search (audit 3.4)
