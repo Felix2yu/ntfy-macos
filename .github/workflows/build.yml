@@ -35,7 +35,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ntfyx-app
-          path: .build/release/ntfyx.app
+          # A glob rather than the literal directory, so the zip keeps the ntfyx.app folder
+          # instead of dropping its Contents/ straight at the artifact root.
+          path: .build/release/*.app
           if-no-files-found: error
 
       - name: Run tests
