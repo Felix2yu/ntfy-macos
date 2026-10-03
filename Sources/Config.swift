@@ -515,4 +515,27 @@ final class ConfigManager: @unchecked Sendable {
     func topicConfig(serverURL: String, topic topicName: String) -> TopicConfig? {
         return config?.topicConfig(serverURL: serverURL, topic: topicName)
     }
+
+    /// Rewrites one server's topic list in the live config and persists it, keeping every
+    /// other setting byte-for-byte. This is the write path behind the subscription actions in
+    /// the history window; `ConfigWatcher` reloads the file afterwards, so callers must not
+    /// also mutate `ConfigManager.shared.config` by hand.
+    static func replacingTopics(
+        serverURL: String,
+        _ transform: (ServerConfig) -> ServerConfig
+    ) throws {
+        guard let config = shared.config else { throw ConfigError.fileNotFound }
+        guard let index = config.servers.firstIndex(where: { $0.url == serverURL }) else {
+            throw ConfigError.decodingError(NSError(
+                domain: "ConfigManager",
+                code: 10,
+                userInfo: [NSLocalizedDescriptionKey: "配置中没有服务器 \(serverURL)"]
+            ))
+        }
+
+        var servers = config.servers
+        servers[index] = transform(servers[index])
+        let updated = AppConfig(servers: servers, localServerPort: config.localServerPort)
+        try saveConfig(updated)
+    }
 }

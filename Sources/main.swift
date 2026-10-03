@@ -113,10 +113,11 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
                 self.historySync = sync
                 HistoryWindowController.shared.configure(store: store, syncService: sync)
             }
-            // Seed the menu bar badge from the database and keep it in sync afterwards.
+            // Seed the badges from the database and keep them in sync afterwards.
             Task { @MainActor in
                 let badgeSync = UnreadBadgeSync(store: store) { count in
                     StatusBarController.shared.setUnreadCount(count)
+                    NSApp.dockTile.badgeLabel = Self.dockBadgeLabel(count)
                 }
                 badgeSync.start()
                 self.badgeSync = badgeSync
@@ -127,6 +128,13 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
             // History is an enhancement; the notification service must keep working without it.
             Log.error("Failed to open history database (history disabled): \(error)")
         }
+    }
+
+    /// Dock tiles have room for a couple of glyphs, so long counts collapse to "99+".
+    /// Zero unreads means no badge at all.
+    private static func dockBadgeLabel(_ count: Int) -> String? {
+        guard count > 0 else { return nil }
+        return count > 99 ? "99+" : "\(count)"
     }
 
     /// Trims expired history once per day (audit 2.4). The delete is bounded by

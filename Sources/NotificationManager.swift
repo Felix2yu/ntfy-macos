@@ -584,7 +584,9 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound, .badge])
+        // No `.badge` here: the Dock badge is the unread count from the history store, and
+        // letting Notification Center increment it too would show a number nobody recognises.
+        completionHandler([.banner, .sound])
     }
 
     func userNotificationCenter(
@@ -602,9 +604,6 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         } else if response.actionIdentifier != UNNotificationDismissActionIdentifier {
             handleActionResponse(response, messageBody: messageBody, topic: topic)
         }
-
-        // Clear badge when user interacts with a notification
-        center.setBadgeCount(0) { _ in }
 
         completionHandler()
     }

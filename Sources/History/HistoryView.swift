@@ -5,6 +5,7 @@ import AppKit
 /// sidebar with topics (grouped by server, unread badges) + message list.
 struct HistoryView: View {
     @ObservedObject var viewModel: HistoryViewModel
+    @State private var isBrowserPresented = false
 
     /// Column width to start at, read once at window creation. A stored value kept live
     /// would let SwiftUI re-assert the column while the user is dragging the divider.
@@ -61,6 +62,28 @@ struct HistoryView: View {
         .onAppear {
             viewModel.refreshSidebar()
         }
+        .sheet(isPresented: $isBrowserPresented) {
+            TopicBrowserView(viewModel: viewModel)
+        }
+        .confirmationDialog(
+            "退役主题「\(viewModel.confirmRetireTopic?.topic ?? "")」？",
+            isPresented: Binding(
+                get: { viewModel.confirmRetireTopic != nil },
+                set: { if !$0 { viewModel.confirmRetireTopic = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("退役并从服务器删除", role: .destructive) {
+                if let ref = viewModel.confirmRetireTopic {
+                    viewModel.retireTopic(ref)
+                }
+            }
+            Button("取消", role: .cancel) {
+                viewModel.confirmRetireTopic = nil
+            }
+        } message: {
+            Text("服务器会丢弃该主题的全部缓存消息与附件，其他设备也会随之清空；服务器上的主题配置不会被改动。本机的历史与订阅保留。")
+        }
     }
 
     // MARK: - Sidebar
@@ -92,6 +115,14 @@ struct HistoryView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    isBrowserPresented = true
+                    viewModel.loadServerTopics()
+                } label: {
+                    Label("服务器主题", systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .font(.footnote)
+                .help("查看服务器上有缓存的主题，点订阅即可加入")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -113,6 +144,11 @@ struct HistoryView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Color.accentColor))
+            }
+        }
+        .contextMenu {
+            Button("从服务器退役…", role: .destructive) {
+                viewModel.confirmRetireTopic = entry.ref
             }
         }
     }
@@ -169,6 +205,141 @@ struct HistoryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Sheet listing what each configured server currently has cached: unsubscribed topics get a
+/// subscribe button, subscribed-but-purged ones get a local-history cleanup.
+private struct TopicBrowserView: View {
+    @ObservedObject var viewModel: HistoryViewModel
+    @Environment(\.dismiss) private var dismiss
+    private static let windowWidth: CGFloat = 420
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("服务器主题")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    viewModel.loadServerTopics()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(viewModel.isLoadingServerTopics)
+                .help("重新向服务器查询主题列表")
+                Button("完成") {
+                    dismiss()
+                }
+            }
+            .padding(12)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if let error = viewModel.serverTopicsError {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                    }
+                    ForEach(browserSections) { section in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(section.serverURL)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ForEach(section.entries) { entry in
+                                row(entry)
+                            }
+                        }
+                    }
+                    if !viewModel.isLoadingServerTopics && browserSections.isEmpty {
+                        Text("没有查询到主题")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+            }
+            if viewModel.isLoadingServerTopics {
+                Divider()
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("正在查询服务器主题…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(8)
+            }
+        }
+        .frame(width: Self.windowWidth, height: 420)
+        .task {
+            if viewModel.serverTopics.isEmpty { viewModel.loadServerTopics() }
+        }
+    }
+
+    private var browserSections: [BrowserSection] {
+        viewModel.serverTopics.keys.sorted().map { url in
+            BrowserSection(serverURL: url, entries: viewModel.serverTopics[url] ?? [])
+        }
+    }
+
+    private struct BrowserSection: Identifiable {
+        let serverURL: String
+        let entries: [HistoryViewModel.ServerTopicEntry]
+        var id: String { serverURL }
+    }
+
+    @ViewBuilder
+    private func row(_ entry: HistoryViewModel.ServerTopicEntry) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: statusIcon(entry.status))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(entry.topic)
+                .lineLimit(1)
+            Spacer()
+            trailing(entry)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func statusIcon(_ status: HistoryViewModel.ServerTopicEntry.Status) -> String {
+        switch status {
+        case .subscribed: return "bell.fill"
+        case .available: return "bell.and.waves.left.and.materialize"
+        case .goneOnServer: return "bell.slash"
+        }
+    }
+
+    @ViewBuilder
+    private func trailing(_ entry: HistoryViewModel.ServerTopicEntry) -> some View {
+        let serverURL = entry.serverURL
+        let topic = entry.topic
+        switch entry.status {
+        case .subscribed:
+            Text("已订阅")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button {
+                viewModel.unsubscribe(serverURL: serverURL, topic: topic)
+            } label: {
+                Image(systemName: "bell.slash")
+            }
+            .buttonStyle(.borderless)
+            .help("取消订阅（本机会一并清掉该主题的历史）")
+        case .available:
+            Button("订阅") {
+                viewModel.subscribe(serverURL: serverURL, topic: topic)
+            }
+        case .goneOnServer:
+            Text("服务器已无缓存")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("清除本地历史") {
+                viewModel.clearLocalHistory(serverURL: serverURL, topic: topic)
+            }
+        }
     }
 }
 

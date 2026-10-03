@@ -20,14 +20,19 @@ struct TopicDetailView: View {
         }
         .frame(minWidth: 560)
         .confirmationDialog(
-            "清空主题「\(topicRef.topic)」的全部本地消息？",
+            "清空主题「\(topicRef.topic)」的全部消息？",
             isPresented: Binding(
                 get: { viewModel.confirmClearTopic != nil },
                 set: { if !$0 { viewModel.confirmClearTopic = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("清空本地消息", role: .destructive) {
+            Button("清空本地并从服务器删除", role: .destructive) {
+                if let ref = viewModel.confirmClearTopic {
+                    viewModel.clearTopic(ref, withServer: true)
+                }
+            }
+            Button("仅清空本地消息", role: .destructive) {
                 if let ref = viewModel.confirmClearTopic {
                     viewModel.clearTopic(ref)
                 }
@@ -36,7 +41,7 @@ struct TopicDetailView: View {
                 viewModel.confirmClearTopic = nil
             }
         } message: {
-            Text("仅从本地历史中移除（服务器缓存不受影响）。")
+            Text("「从服务器删除」会同步清掉其他设备上的这些消息；仅清空本地只影响这台 Mac，服务器缓存不变。")
         }
     }
 
@@ -79,7 +84,7 @@ struct TopicDetailView: View {
             } label: {
                 Label("清空", systemImage: "trash")
             }
-            .help("清空该主题的本地历史消息")
+            .help("清空该主题的历史消息")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -162,7 +167,7 @@ struct TopicDetailView: View {
     private var syncStatusFooter: some View {
         let progress = viewModel.syncService.progress(for: topicRef)
         return HStack(spacing: 8) {
-            if let notice = viewModel.markReadSyncNotice {
+            if let notice = viewModel.serverSyncNotice {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
                 Text(notice)
@@ -171,7 +176,7 @@ struct TopicDetailView: View {
                     .lineLimit(1)
                     .help(notice)
                 Button {
-                    viewModel.markReadSyncNotice = nil
+                    viewModel.serverSyncNotice = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.tertiary)
