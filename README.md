@@ -5,7 +5,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![macOS 26+](https://img.shields.io/badge/macOS-26%2B-brightgreen.svg)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6-orange.svg)](https://swift.org/)
-[![Homebrew](https://img.shields.io/badge/Homebrew-tap-brown.svg)](https://github.com/laurentftech/homebrew-ntfy-macos)
 [![Tests](https://img.shields.io/badge/Tests-342-brightgreen.svg)]()
 
 在 Mac 上接收来自任何来源的推送通知——服务器、IoT 设备、智能家居、CI 流水线或自定义脚本。无需注册账号，既可使用公共 [ntfy.sh](https://ntfy.sh) 服务，也支持自建服务器。
@@ -40,15 +39,16 @@
 
 ## 安装
 
-### 使用 Homebrew
+### 下载预构建版本
+
+从 [Releases](https://github.com/Felix2yu/ntfyx/releases) 取 `ntfyx-<版本>.tar.gz`：
 
 ```bash
-# 添加 tap 源
-brew tap laurentftech/ntfy-macos
-
-# 安装
-brew install ntfyx
+tar -xzf ntfyx-<版本>.tar.gz
+sudo cp -r ntfyx.app /Applications/
 ```
+
+应用只做 ad-hoc 签名、没有公证，首次打开若被 Gatekeeper 拦下，用右键 → 打开，或先执行 `xattr -dr com.apple.quarantine /Applications/ntfyx.app`。
 
 ### 从源码构建
 
@@ -62,19 +62,23 @@ cd ntfyx
 
 # 安装
 sudo cp -r .build/release/ntfyx.app /Applications/
+
+# 让 ntfyx 命令可用（可选）
+sudo ln -sf /Applications/ntfyx.app/Contents/MacOS/ntfyx /usr/local/bin/ntfyx
 ```
+
+**注意**：构建需要完整版 Xcode（仅 Command Line Tools 不够），SwiftUI 的宏插件不在 Command Line Tools 里。
 
 ### 更新
 
 ```bash
-# 通过 Homebrew 更新
-brew update && brew upgrade ntfyx
-
-# 重启服务以应用更新
-brew services restart ntfyx
+cd ntfyx
+git pull
+./build-app.sh
+sudo cp -r .build/release/ntfyx.app /Applications/
 ```
 
-**注意**：通过 Homebrew 安装需要完整版 Xcode（仅 Command Line Tools 不够），因为应用是从源码构建的。
+然后重新启动服务。
 
 ## 快速开始
 
@@ -114,10 +118,6 @@ ntfyx auth add https://ntfy.sh tk_yourtoken
 4. **启动服务**
 
 ```bash
-# 使用 Homebrew services（推荐——崩溃后自动重启）
-brew services start ntfyx
-
-# 或直接运行
 ntfyx serve
 ```
 
@@ -130,7 +130,7 @@ ntfyx serve
 - 关闭主窗口不会退出应用，通知服务继续在后台运行；点击 Dock 图标可重新打开主窗口
 - 屏幕顶部为完整的应用菜单：`ntfyx`（关于 / 设置 ⌘, / 隐藏 / 退出）、`文件`（通知历史 ⇧⌘H、重载配置 ⌘R、在 Finder 中显示配置、查看日志 ⇧⌘L、关闭 ⌘W）、`编辑`、`窗口`、`帮助`
 
-**后台服务（`ntfyx serve`，含 `brew services` / launchd 拉起）**
+**后台服务（`ntfyx serve`，由 launchd 或终端拉起）**
 - 不显示 Dock 图标，也不打开任何窗口
 
 菜单栏功能：
@@ -142,12 +142,6 @@ ntfyx serve
 - **查看日志**：打开日志文件（自动轮转）（⌘L）
 - **关于**：制作团队与相关链接
 - **退出**：停止服务
-
-5. **（可选）添加到启动台**
-
-```bash
-sudo ln -sf /usr/local/opt/ntfyx/ntfyx.app /Applications/
-```
 
 ## 配置
 
@@ -458,15 +452,15 @@ ntfy 支持在 `Tags` 字段中使用 [emoji 短代码](https://docs.ntfy.sh/emo
 
 - **专注模式**：检查是否开启了专注模式/勿扰模式。
 - **权限**：前往 系统设置 → 通知 → ntfyx，确认已允许通知。
-- **后台运行**：如果通过 `brew services` 启动，请确保应用有后台运行权限。
+- **后台运行**：如果由 launchd 拉起，请确保应用有后台运行权限。
 
 ### 权限弹窗点击无响应
 
 如果权限弹窗无法点击：
 
-1. 停止服务：`brew services stop ntfyx`
+1. 停止服务：菜单栏图标 → 退出，或 `pkill -x ntfyx`
 2. 手动授权：系统设置 → 通知 → ntfyx → 允许通知
-3. 重启服务：`brew services start ntfyx`
+3. 重启服务：`ntfyx serve`
 
 ## 故障排查
 
