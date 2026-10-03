@@ -53,5 +53,5 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: ntfy-macos
-          path: .build/release/ntfy-macos
+          name: ntfyx
+          path: .build/release/ntfyx

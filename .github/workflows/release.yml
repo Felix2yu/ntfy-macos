@@ -50,12 +50,12 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           cd .build/release
-          tar -czf "ntfy-macos-${VERSION}.tar.gz" ntfy-macos.app
+          tar -czf "ntfyx-${VERSION}.tar.gz" ntfyx.app
       
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: .build/release/ntfy-macos-${{ steps.version.outputs.VERSION }}.tar.gz
+          files: .build/release/ntfyx-${{ steps.version.outputs.VERSION }}.tar.gz
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,15 +82,15 @@ jobs:
           git clone https://github.com/laurentftech/homebrew-ntfy-macos.git tap
           cd tap
           
-          cat > Formula/ntfy-macos.rb << 'FORMULA'
-          class NtfyMacos < Formula
+          cat > Formula/ntfyx.rb << 'FORMULA'
+          class Ntfyx < Formula
             desc "Native macOS CLI notifier and automation agent for ntfy"
-            homepage "https://github.com/Felix2yu/ntfy-macos"
+            homepage "https://github.com/Felix2yu/ntfyx"
             url "SOURCE_URL_PLACEHOLDER"
             sha256 "SHA256_PLACEHOLDER"
             license "MIT"
             version "VERSION_PLACEHOLDER"
-            head "https://github.com/Felix2yu/ntfy-macos.git", branch: "main"
+            head "https://github.com/Felix2yu/ntfyx.git", branch: "main"
           
             depends_on xcode: ["26.0", :build]
             depends_on :macos
@@ -98,7 +98,7 @@ jobs:
             def install
               system "swift", "build", "-c", "release", "--disable-sandbox"
               
-              app_name = "ntfy-macos"
+              app_name = "ntfyx"
               app_bundle = "#{app_name}.app"
               build_dir = ".build/release"
               
@@ -107,7 +107,7 @@ jobs:
               
               cp "#{build_dir}/#{app_name}", "#{build_dir}/#{app_bundle}/Contents/MacOS/"
               cp "Resources/Info.plist", "#{build_dir}/#{app_bundle}/Contents/"
-              cp "Resources/ntfy-macos.icns", "#{build_dir}/#{app_bundle}/Contents/Resources/"
+              cp "Resources/ntfyx.icns", "#{build_dir}/#{app_bundle}/Contents/Resources/"
               
               system "codesign", "--force", "--deep", "--sign", "-", "#{build_dir}/#{app_bundle}"
               
@@ -116,31 +116,31 @@ jobs:
             end
           
             service do
-              run [opt_prefix/"ntfy-macos.app/Contents/MacOS/ntfy-macos", "serve"]
+              run [opt_prefix/"ntfyx.app/Contents/MacOS/ntfyx", "serve"]
               keep_alive crashed: true
-              log_path var/"log/ntfy-macos/stdout.log"
-              error_log_path var/"log/ntfy-macos/stderr.log"
+              log_path var/"log/ntfyx/stdout.log"
+              error_log_path var/"log/ntfyx/stderr.log"
             end
 
             def caveats
               <<~EOS
-                To add ntfy-macos to Launchpad:
-                  sudo ln -sf #{opt_prefix}/ntfy-macos.app /Applications/
+                To add ntfyx to Launchpad:
+                  sudo ln -sf #{opt_prefix}/ntfyx.app /Applications/
               EOS
             end
 
             test do
-              system bin/"ntfy-macos", "help"
+              system bin/"ntfyx", "help"
             end
           end
           FORMULA
           
-          sed -i '' "s|SOURCE_URL_PLACEHOLDER|${SOURCE_URL}|g" Formula/ntfy-macos.rb
-          sed -i '' "s|SHA256_PLACEHOLDER|${SHA256}|g" Formula/ntfy-macos.rb
-          sed -i '' "s|VERSION_PLACEHOLDER|${VERSION}|g" Formula/ntfy-macos.rb
+          sed -i '' "s|SOURCE_URL_PLACEHOLDER|${SOURCE_URL}|g" Formula/ntfyx.rb
+          sed -i '' "s|SHA256_PLACEHOLDER|${SHA256}|g" Formula/ntfyx.rb
+          sed -i '' "s|VERSION_PLACEHOLDER|${VERSION}|g" Formula/ntfyx.rb
           
-          git add Formula/ntfy-macos.rb
-          git commit -m "Update ntfy-macos to ${VERSION}"
+          git add Formula/ntfyx.rb
+          git commit -m "Update ntfyx to ${VERSION}"
           git push https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/laurentftech/homebrew-ntfy-macos.git main
 
       - name: Notify via ntfy
@@ -158,13 +158,13 @@ jobs:
           fi
           if [ "$JOB_STATUS" = "success" ]; then
             curl -s -X POST "https://ntfy.sh/$NTFY_TOPIC" \
-              -H "Title: ntfy-macos ${VERSION} released" \
+              -H "Title: ntfyx ${VERSION} released" \
               -H "Priority: 3" \
               -H "Tags: tada,rocket" \
               -d "Release ${VERSION} published successfully. Homebrew tap updated."
           else
             curl -s -X POST "https://ntfy.sh/$NTFY_TOPIC" \
-              -H "Title: ntfy-macos ${VERSION} release failed" \
+              -H "Title: ntfyx ${VERSION} release failed" \
               -H "Priority: 4" \
               -H "Tags: x,warning" \
               -d "Release workflow failed for ${VERSION}. Check: https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}"
