@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 @MainActor
 class StatusBarController: NSObject {
@@ -8,7 +9,10 @@ class StatusBarController: NSObject {
     private var pauseMenuItem: NSMenuItem?
     private var serversSubmenu: NSMenu?
     private var errorMenuItem: NSMenuItem?
+    private var syncMenuItem: NSMenuItem?
+    private var syncStatusMenuItem: NSMenuItem?
     private var aboutWindow: NSWindow?
+    private var cancellables: Set<AnyCancellable> = []
     var onReloadConfig: (() -> Void)?
 
     // Connection tracking
@@ -61,6 +65,7 @@ class StatusBarController: NSObject {
         }
 
         setupMenu()
+        observeSyncStatus()
     }
 
     private func setupMenu() {
@@ -113,6 +118,19 @@ class StatusBarController: NSObject {
         reloadConfigItem.target = self
         reloadConfigItem.isEnabled = true
         menu?.addItem(reloadConfigItem)
+
+        // iCloud sync (hidden until the feature is turned on)
+        syncStatusMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        syncStatusMenuItem?.isEnabled = false
+        syncStatusMenuItem?.isHidden = true
+        menu?.addItem(syncStatusMenuItem!)
+
+        syncMenuItem = NSMenuItem(title: "立即同步配置", action: #selector(syncConfigNow), keyEquivalent: "")
+        syncMenuItem?.target = self
+        syncMenuItem?.isEnabled = true
+        syncMenuItem?.isHidden = true
+        syncMenuItem?.toolTip = "与 iCloud Drive 中的配置立即合并；平时由配置改动与定时轮询触发"
+        menu?.addItem(syncMenuItem!)
 
         menu?.addItem(NSMenuItem.separator())
 
@@ -283,6 +301,53 @@ class StatusBarController: NSObject {
 
     func updateStatus(_ status: String) {
         statusMenuItem?.title = status
+    }
+
+    // MARK: - iCloud config sync
+
+    @objc private func syncConfigNow() {
+        ConfigSyncService.shared.syncNow()
+    }
+
+    private func observeSyncStatus() {
+        refreshSyncMenuItems(ConfigSyncService.shared.status)
+        ConfigSyncService.shared.statusPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.refreshSyncMenuItems(status)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func refreshSyncMenuItems(_ status: ConfigSyncService.Status) {
+        let showSync = ConfigSyncService.shared.isEnabled
+        syncMenuItem?.isHidden = !showSync
+        guard let item = syncStatusMenuItem else { return }
+        item.isHidden = !showSync
+        guard showSync else { return }
+
+        item.attributedTitle = nil
+        item.toolTip = nil
+        switch status {
+        case .off:
+            item.title = "iCloud 同步：已关闭"
+        case .waiting:
+            item.title = "iCloud 同步：等待首次同步"
+        case .syncing:
+            item.title = "iCloud 同步：正在同步…"
+        case .synced(let date):
+            item.title = "iCloud 同步：已于 \(date.formatted(date: .omitted, time: .shortened)) 同步"
+        case .failed(let message):
+            item.title = ""
+            item.attributedTitle = NSAttributedString(
+                string: "⚠️ iCloud 同步失败",
+                attributes: [
+                    .foregroundColor: NSColor.systemOrange,
+                    .font: NSFont.systemFont(ofSize: 13)
+                ]
+            )
+            item.toolTip = message
+        }
     }
 
     /// Shows a configuration error in the menu (in red)

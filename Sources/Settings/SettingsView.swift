@@ -5,8 +5,10 @@ import AppKit
 /// servers rendered as collapsible rows so one or two servers stay compact.
 struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
+    @ObservedObject var syncService: ConfigSyncService
     @State private var copiedCommand: String?
     @State private var statusTimer: Timer?
+    @State private var syncDirectory = ""
 
     @AppStorage(AppSettings.expandMessagesByDefaultKey) private var expandByDefault = false
     @AppStorage(AppSettings.messageFontSizeKey) private var messageFontSize = 13.0
@@ -21,6 +23,7 @@ struct SettingsView: View {
         Form {
             generalSection
             serversSection
+            iCloudSyncSection
             localServerSection
         }
         .formStyle(.grouped)
@@ -30,6 +33,7 @@ struct SettingsView: View {
             viewModel.refreshConnectionStates()
             startStatusTimer()
             launchAtLogin = LoginItem.isEnabled
+            syncDirectory = syncService.syncDirectory
         }
         .onDisappear {
             stopStatusTimer()
@@ -103,6 +107,92 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - iCloud 同步
+
+    private var iCloudSyncSection: some View {
+        Section {
+            Toggle("通过 iCloud 同步配置", isOn: Binding(
+                get: { syncService.isEnabled },
+                set: { syncService.setEnabled($0) }
+            ))
+            .help("在各台 Mac 之间同步服务器与主题配置。消息不经 iCloud，仍直接从 ntfy 服务器获取。")
+
+            if syncService.isEnabled {
+                LabeledContent("同步文件夹") {
+                    HStack(spacing: 8) {
+                        Text(syncDirectory)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 250, alignment: .trailing)
+                        Button("选择…") { chooseSyncDirectory() }
+                    }
+                }
+
+                if !syncService.directoryOverride.isEmpty {
+                    Button("改用 iCloud Drive") {
+                        syncService.setDirectory("")
+                        syncDirectory = syncService.syncDirectory
+                    }
+                    .buttonStyle(.borderless)
+                }
+
+                syncStatusRow
+
+                Button {
+                    syncService.syncNow()
+                } label: {
+                    Label("立即同步", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.borderless)
+
+                Text("同步文件里包含服务器令牌，iCloud Drive 上的这份内容是明文。脚本、图标路径、通知动作和本地服务端口只留在本机，不参与同步。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("iCloud 同步")
+        }
+    }
+
+    @ViewBuilder
+    private var syncStatusRow: some View {
+        switch syncService.status {
+        case .off:
+            EmptyView()
+        case .waiting:
+            Label("等待首次同步…", systemImage: "icloud.and.arrow.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .syncing:
+            Label("正在同步…", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .synced(let date):
+            Label("上次同步：\(date.formatted(date: .abbreviated, time: .shortened))", systemImage: "checkmark.icloud.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    private func chooseSyncDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "选择"
+        panel.message = "选择存放 ntfyx 同步配置文件的文件夹"
+        panel.directoryURL = URL(fileURLWithPath: syncService.syncDirectory, isDirectory: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        syncService.setDirectory(url.path)
+        syncDirectory = syncService.syncDirectory
     }
 
     // MARK: - 本地通知服务

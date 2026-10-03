@@ -25,7 +25,7 @@ class SettingsWindowController: NSObject, NSWindowDelegate {
         vm.loadFromConfig()
         self.viewModel = vm
 
-        let hostingController = NSHostingController(rootView: SettingsView(viewModel: vm))
+        let hostingController = NSHostingController(rootView: SettingsView(viewModel: vm, syncService: ConfigSyncService.shared))
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 600),
