@@ -4,7 +4,7 @@ import XCTest
 /// One merge-and-converge pass end to end. These exercise the orchestration — which side
 /// gets written, what happens when nothing changed, and the two ways a pass can stop early —
 /// against a temporary folder, with the real config file and Keychain kept out of it.
-final class ConfigSyncEngineTests: XCTestCase {
+final class ConfigSyncOrchestrationTests: XCTestCase {
     private let url = "https://a.example"
 
     private var directory: URL!
