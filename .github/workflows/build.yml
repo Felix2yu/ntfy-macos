@@ -27,7 +27,9 @@ jobs:
       - name: Run tests
         run: |
           set -o pipefail
-          swift test 2>&1 | tee test-output.txt
+          # HistoryE2ETests publishes to the user's own server, whose DNS resolves only
+          # through their local proxy, so a runner can never reach it.
+          swift test --skip HistoryE2ETests 2>&1 | tee test-output.txt
 
       - name: Test Summary
         if: always()
