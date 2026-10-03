@@ -18,7 +18,7 @@
 | 模块簇 | 角色 | 文件数 | 依赖 |
 |--------|------|--------|------|
 | **Sources** | `internal` | 16 | — |
-| **Tests/ntfy-macosTests** | `internal` | 15 | — |
+| **Tests/ntfyxTests** | `internal` | 15 | — |
 | **examples/scripts** | `internal` | 9 | — |
 | **（根目录）** | `internal` | 8 | — |
 | **Sources/Settings** | `internal` | 5 | — |

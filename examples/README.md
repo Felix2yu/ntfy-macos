@@ -1,4 +1,4 @@
-# ntfy-macos Examples
+# ntfyx Examples
 
 This folder contains example configurations and scripts for common automation scenarios.
 
@@ -87,7 +87,7 @@ curl -X POST http://127.0.0.1:9292/notify \
 
 2. Edit scripts to match your configuration (paths, tokens, servers)
 
-3. Add the corresponding topic configuration to `~/.config/ntfy-macos/config.yml`
+3. Add the corresponding topic configuration to `~/.config/ntfyx/config.yml`
 
 ## Sending Test Notifications
 

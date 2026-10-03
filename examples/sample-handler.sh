@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Example ntfy-macos notification handler script
+# Example ntfyx notification handler script
 # This script receives the notification message as the first argument
 # and ntfy message metadata as environment variables.
 
 # First argument (legacy, still supported)
 MESSAGE="$1"
 
-# Environment variables set by ntfy-macos
+# Environment variables set by ntfyx
 # NTFY_ID       - Unique message ID
 # NTFY_TOPIC    - Topic name
 # NTFY_TIME     - Message timestamp (Unix epoch)
@@ -19,7 +19,7 @@ MESSAGE="$1"
 # NTFY_CLICK    - Click URL (if set)
 
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-LOG_FILE="$HOME/.ntfy-macos-handler.log"
+LOG_FILE="$HOME/.ntfyx-handler.log"
 
 # Log the message with metadata
 echo "[$TIMESTAMP] Topic: $NTFY_TOPIC | Priority: ${NTFY_PRIORITY:-3} | Message: $NTFY_MESSAGE" >> "$LOG_FILE"

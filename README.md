@@ -1,6 +1,6 @@
-# ntfy-macos
+# ntfyx
 
-[![Build & Test](https://github.com/Felix2yu/ntfy-macos/actions/workflows/build.yml/badge.svg)](https://github.com/Felix2yu/ntfy-macos/actions/workflows/build.yml)
+[![Build & Test](https://github.com/Felix2yu/ntfyx/actions/workflows/build.yml/badge.svg)](https://github.com/Felix2yu/ntfyx/actions/workflows/build.yml)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/laurentftech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![macOS 26+](https://img.shields.io/badge/macOS-26%2B-brightgreen.svg)](https://www.apple.com/macos/)
@@ -10,9 +10,9 @@
 
 在 Mac 上接收来自任何来源的推送通知——服务器、IoT 设备、智能家居、CI 流水线或自定义脚本。无需注册账号，既可使用公共 [ntfy.sh](https://ntfy.sh) 服务，也支持自建服务器。
 
-**ntfy-macos** 是一款原生 macOS 客户端，可订阅 ntfy 主题（topic），并推送带有 SF Symbols 图标、图片和交互按钮的富通知。收到消息时还能自动触发 shell 脚本。
+**ntfyx** 是一款原生 macOS 客户端，可订阅 ntfy 主题（topic），并推送带有 SF Symbols 图标、图片和交互按钮的富通知。收到消息时还能自动触发 shell 脚本。
 
-<img src="docs/ntfy-macos-snapshot.png" width="400" alt="ntfy-macos 通知示例">
+<img src="docs/ntfyx-snapshot.png" width="400" alt="ntfyx 通知示例">
 
 ## 功能特性
 
@@ -47,31 +47,31 @@
 brew tap laurentftech/ntfy-macos
 
 # 安装
-brew install ntfy-macos
+brew install ntfyx
 ```
 
 ### 从源码构建
 
 ```bash
 # 克隆仓库
-git clone https://github.com/Felix2yu/ntfy-macos.git
-cd ntfy-macos
+git clone https://github.com/Felix2yu/ntfyx.git
+cd ntfyx
 
 # 构建 app bundle
 ./build-app.sh
 
 # 安装
-sudo cp -r .build/release/ntfy-macos.app /Applications/
+sudo cp -r .build/release/ntfyx.app /Applications/
 ```
 
 ### 更新
 
 ```bash
 # 通过 Homebrew 更新
-brew update && brew upgrade ntfy-macos
+brew update && brew upgrade ntfyx
 
 # 重启服务以应用更新
-brew services restart ntfy-macos
+brew services restart ntfyx
 ```
 
 **注意**：通过 Homebrew 安装需要完整版 Xcode（仅 Command Line Tools 不够），因为应用是从源码构建的。
@@ -81,10 +81,10 @@ brew services restart ntfy-macos
 1. **初始化配置**
 
 ```bash
-ntfy-macos init
+ntfyx init
 ```
 
-这会在 `~/.config/ntfy-macos/config.yml` 创建一份示例配置。
+这会在 `~/.config/ntfyx/config.yml` 创建一份示例配置。
 
 2. **编辑配置**
 
@@ -108,29 +108,29 @@ servers:
 3. **（可选）将认证令牌存入钥匙串**
 
 ```bash
-ntfy-macos auth add https://ntfy.sh tk_yourtoken
+ntfyx auth add https://ntfy.sh tk_yourtoken
 ```
 
 4. **启动服务**
 
 ```bash
 # 使用 Homebrew services（推荐——崩溃后自动重启）
-brew services start ntfy-macos
+brew services start ntfyx
 
 # 或直接运行
-ntfy-macos serve
+ntfyx serve
 ```
 
 首次启动时，应用会自动请求通知权限。
 
 两种运行形态共用同一份配置，启动后常驻菜单栏：
 
-**图形界面（双击图标或 `open ntfy-macos.app`，未带任何参数）**
+**图形界面（双击图标或 `open ntfyx.app`，未带任何参数）**
 - 带 Dock 图标的标准应用，打开即显示 **通知历史** 主窗口
 - 关闭主窗口不会退出应用，通知服务继续在后台运行；点击 Dock 图标可重新打开主窗口
-- 屏幕顶部为完整的应用菜单：`ntfy-macos`（关于 / 设置 ⌘, / 隐藏 / 退出）、`文件`（通知历史 ⇧⌘H、重载配置 ⌘R、在 Finder 中显示配置、查看日志 ⇧⌘L、关闭 ⌘W）、`编辑`、`窗口`、`帮助`
+- 屏幕顶部为完整的应用菜单：`ntfyx`（关于 / 设置 ⌘, / 隐藏 / 退出）、`文件`（通知历史 ⇧⌘H、重载配置 ⌘R、在 Finder 中显示配置、查看日志 ⇧⌘L、关闭 ⌘W）、`编辑`、`窗口`、`帮助`
 
-**后台服务（`ntfy-macos serve`，含 `brew services` / launchd 拉起）**
+**后台服务（`ntfyx serve`，含 `brew services` / launchd 拉起）**
 - 不显示 Dock 图标，也不打开任何窗口
 
 菜单栏功能：
@@ -146,12 +146,12 @@ ntfy-macos serve
 5. **（可选）添加到启动台**
 
 ```bash
-sudo ln -sf /usr/local/opt/ntfy-macos/ntfy-macos.app /Applications/
+sudo ln -sf /usr/local/opt/ntfyx/ntfyx.app /Applications/
 ```
 
 ## 配置
 
-配置文件位于 `~/.config/ntfy-macos/config.yml`。
+配置文件位于 `~/.config/ntfyx/config.yml`。
 
 完整的配置项列表和详细示例请参阅 [config-examples.yml](examples/config-examples.yml) 文件。
 
@@ -211,7 +211,7 @@ servers:
 
 各类动作的处理方式汇总：
 
-| 动作类型    | ntfy 协议 | ntfy-macos（消息负载）     | ntfy-macos（config.yml）    |
+| 动作类型    | ntfy 协议 | ntfyx（消息负载）     | ntfyx（config.yml）    |
 | ----------- | --------- | -------------------------- | --------------------------- |
 | view        | ✅ 标准    | ✅ 支持                     | ✅ 支持                      |
 | http        | ✅ 标准    | ✅ 支持                     | ❌ 不支持（有意为之）        |
@@ -222,7 +222,7 @@ servers:
 
 > `script`、`applescript` 和 `shortcut` 动作**只能通过 config.yml 配置**——无法通过消息负载触发。这样可防止远程代码执行。
 
-**注意**：`applescript` 和 `shortcut` 是 **ntfy-macos 客户端特有的动作类型**。官方 ntfy 协议仅包含 `view`、`http`、`broadcast` 和 `dismiss`。
+**注意**：`applescript` 和 `shortcut` 是 **ntfyx 客户端特有的动作类型**。官方 ntfy 协议仅包含 `view`、`http`、`broadcast` 和 `dismiss`。
 
 ## CLI 命令
 
@@ -231,7 +231,7 @@ servers:
 启动通知服务：
 
 ```bash
-ntfy-macos serve
+ntfyx serve
 ```
 
 ### auth
@@ -240,13 +240,13 @@ ntfy-macos serve
 
 ```bash
 # 添加令牌
-ntfy-macos auth add <server-url> <token>
+ntfyx auth add <server-url> <token>
 
 # 列出所有已存储的令牌
-ntfy-macos auth list
+ntfyx auth list
 
 # 删除令牌
-ntfy-macos auth remove <server-url>
+ntfyx auth remove <server-url>
 ```
 
 钥匙串中的令牌优先于 YAML 配置文件中的令牌。
@@ -256,7 +256,7 @@ ntfy-macos auth remove <server-url>
 发送一条测试通知（并请求权限）：
 
 ```bash
-ntfy-macos test-notify --topic <NAME>
+ntfyx test-notify --topic <NAME>
 ```
 
 ### init
@@ -264,7 +264,7 @@ ntfy-macos test-notify --topic <NAME>
 创建示例配置文件：
 
 ```bash
-ntfy-macos init
+ntfyx init
 ```
 
 ### help
@@ -272,7 +272,7 @@ ntfy-macos init
 显示帮助信息：
 
 ```bash
-ntfy-macos help
+ntfyx help
 ```
 
 ## 脚本执行
@@ -316,19 +316,19 @@ chmod +x /path/to/your/script.sh
 
 ### 安全须知
 
-脚本**只在本地 `config.yml` 中明确配置后才会执行**。ntfy-macos 绝不会执行来自消息内容的任意代码。
+脚本**只在本地 `config.yml` 中明确配置后才会执行**。ntfyx 绝不会执行来自消息内容的任意代码。
 
 **最佳实践：**
 - 只配置你信任且审查过的脚本
 - 脚本使用绝对路径
 - 公共主题避免使用 `auto_run_script`
-- 妥善保管配置文件（`chmod 600 ~/.config/ntfy-macos/config.yml`）
+- 妥善保管配置文件（`chmod 600 ~/.config/ntfyx/config.yml`）
 - 涉及敏感自动化时，使用带认证的自建 ntfy 服务器
 - 使用 `allowed_schemes` 和 `allowed_domains` 限制可打开的链接范围。
 
 ## 本地通知服务器
 
-ntfy-macos 可以在 localhost 上运行一个本地 HTTP 服务器，让脚本和本地工具直接触发 macOS 通知，无需经过外部 ntfy 服务器。
+ntfyx 可以在 localhost 上运行一个本地 HTTP 服务器，让脚本和本地工具直接触发 macOS 通知，无需经过外部 ntfy 服务器。
 
 ```mermaid
 flowchart LR
@@ -338,7 +338,7 @@ flowchart LR
         ci["🔧 CI 流水线"]
     end
 
-    subgraph ntfy-macos
+    subgraph ntfyx
         client["📡 ntfy 客户端"]
         script["📜 auto_run_script"]
         local["🖥️ 本地 HTTP 服务器
@@ -444,7 +444,7 @@ ntfy 优先级与 macOS 中断级别的对应关系：
 
 ## Markdown 消息
 
-macOS 原生通知仅支持纯文本，无法渲染格式化的 markdown。ntfy-macos 会自动剔除消息中的 markdown 语法，让显示更清爽。
+macOS 原生通知仅支持纯文本，无法渲染格式化的 markdown。ntfyx 会自动剔除消息中的 markdown 语法，让显示更清爽。
 
 ## Emoji 标签
 
@@ -457,21 +457,21 @@ ntfy 支持在 `Tags` 字段中使用 [emoji 短代码](https://docs.ntfy.sh/emo
 ### 通知不显示怎么办？
 
 - **专注模式**：检查是否开启了专注模式/勿扰模式。
-- **权限**：前往 系统设置 → 通知 → ntfy-macos，确认已允许通知。
+- **权限**：前往 系统设置 → 通知 → ntfyx，确认已允许通知。
 - **后台运行**：如果通过 `brew services` 启动，请确保应用有后台运行权限。
 
 ### 权限弹窗点击无响应
 
 如果权限弹窗无法点击：
 
-1. 停止服务：`brew services stop ntfy-macos`
-2. 手动授权：系统设置 → 通知 → ntfy-macos → 允许通知
-3. 重启服务：`brew services start ntfy-macos`
+1. 停止服务：`brew services stop ntfyx`
+2. 手动授权：系统设置 → 通知 → ntfyx → 允许通知
+3. 重启服务：`brew services start ntfyx`
 
 ## 故障排查
 
-- **日志**：`~/.local/share/ntfy-macos/logs/ntfy-macos.log`
-- **测试通知**：`ntfy-macos test-notify --topic test`
+- **日志**：`~/.local/share/ntfyx/logs/ntfyx.log`
+- **测试通知**：`ntfyx test-notify --topic test`
 - **连接问题**：核对服务器地址和令牌。
 - **脚本未执行**：确认脚本有执行权限（`chmod +x`）。
 

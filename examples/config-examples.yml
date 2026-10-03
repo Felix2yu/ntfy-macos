@@ -1,5 +1,5 @@
-# ntfy-macos 配置示例
-# 将相关片段复制到 ~/.config/ntfy-macos/config.yml
+# ntfyx 配置示例
+# 将相关片段复制到 ~/.config/ntfyx/config.yml
 #
 # 注意：配置中的未知键会在菜单栏触发警告。
 # 这有助于发现诸如 "icon_path" 误写成 "iconpath"、或选项放错位置之类的拼写错误。
