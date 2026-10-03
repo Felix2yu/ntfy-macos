@@ -58,7 +58,7 @@ struct TopicConfig: Codable {
 }
 
 /// Represents click_url config: can be a URL string, true (use default), or false (disabled)
-enum ClickUrlConfig: Codable {
+enum ClickUrlConfig: Codable, Equatable {
     case enabled          // true or not specified: use webUrl or url
     case disabled         // false: don't open anything on click
     case custom(String)   // custom URL
