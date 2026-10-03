@@ -771,19 +771,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return true
     }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        // Unregister from launchctl to allow clean restart via brew services
-        // This silently fails if not launched via brew services, which is fine
-        let uid = getuid()
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        task.arguments = ["bootout", "gui/\(uid)/homebrew.mxcl.ntfyx"]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        try? task.run()
-        task.waitUntilExit()
-    }
 }
 
 // Entry point - Initialize NSApplication for proper macOS app behavior
