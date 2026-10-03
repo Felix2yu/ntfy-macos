@@ -144,7 +144,7 @@ final class NtfyClient: NSObject, @unchecked Sendable {
         // Create a dedicated serial queue for URLSession callbacks
         self.delegateQueue = OperationQueue()
         self.delegateQueue.maxConcurrentOperationCount = 1
-        self.delegateQueue.name = "com.ntfy-macos.urlsession"
+        self.delegateQueue.name = "com.ntfyx.urlsession"
 
         super.init()
 

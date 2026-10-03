@@ -298,10 +298,10 @@ final class ConfigManager: @unchecked Sendable {
 
     private init() {}
 
-    /// Default configuration path: ~/.config/ntfy-macos/config.yml
+    /// Default configuration path: ~/.config/ntfyx/config.yml
     static var defaultConfigPath: String {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        return homeDir.appendingPathComponent(".config/ntfy-macos/config.yml").path
+        return homeDir.appendingPathComponent(".config/ntfyx/config.yml").path
     }
 
     /// Loads configuration from the specified path or default location
@@ -452,11 +452,11 @@ final class ConfigManager: @unchecked Sendable {
         )
 
         let sampleYAML = """
-        # ntfy-macos 配置文件
+        # ntfyx 配置文件
         # local_server_port: 9292  # 可选：启用本地 HTTP 服务器，供脚本触发通知
         servers:
           - url: https://ntfy.sh
-            # token: your_token_here  # 可选，或使用 'ntfy-macos auth add' 存入钥匙串
+            # token: your_token_here  # 可选，或使用 'ntfyx auth add' 存入钥匙串
             # allowed_schemes:  # 可选，默认为 [http, https]
             #   - https
             #   - myapp

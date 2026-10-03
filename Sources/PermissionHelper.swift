@@ -36,7 +36,7 @@ class PermissionHelper {
         )
         self.window = window
 
-        window.title = "ntfy-macos - 通知权限设置"
+        window.title = "ntfyx - 通知权限设置"
         window.center()
 
         let contentView = NSView(frame: window.contentView!.bounds)
@@ -74,7 +74,7 @@ class PermissionHelper {
             DispatchQueue.main.async {
                 switch status {
                 case .notDetermined:
-                    self.label?.stringValue = "ntfy-macos 需要权限才能发送通知。\n\n点击下方按钮以请求权限。"
+                    self.label?.stringValue = "ntfyx 需要权限才能发送通知。\n\n点击下方按钮以请求权限。"
                     button.isEnabled = true
 
                 case .authorized:
@@ -82,7 +82,7 @@ class PermissionHelper {
                     self.finish(granted: true)
 
                 case .denied:
-                    self.label?.stringValue = "⚠️ 通知权限已被拒绝。\n\n请前往 系统设置 → 通知 → ntfy-macos 手动开启"
+                    self.label?.stringValue = "⚠️ 通知权限已被拒绝。\n\n请前往 系统设置 → 通知 → ntfyx 手动开启"
                     button.title = "打开系统设置"
                     button.isEnabled = true
                     button.action = #selector(PermissionHelperTarget.openSettings)

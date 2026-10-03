@@ -121,21 +121,21 @@ enum NtfyError: Error, LocalizedError, Sendable {
     var recoverySuggestion: String? {
         switch self {
         case .configNotFound:
-            return "运行 'ntfy-macos init' 创建示例配置"
+            return "运行 'ntfyx init' 创建示例配置"
         case .configInvalid, .configValidationFailed:
             return "请检查 config.yml 文件中的语法错误"
         case .insecureFilePermissions:
-            return "运行 'chmod 600 ~/.config/ntfy-macos/config.yml' 加固配置文件权限"
+            return "运行 'chmod 600 ~/.config/ntfyx/config.yml' 加固配置文件权限"
         case .unknownConfigKeys:
             return "请从 config.yml 中移除未知配置项"
         case .keychainItemNotFound:
-            return "运行 'ntfy-macos auth add <server> <token>' 存储认证信息"
+            return "运行 'ntfyx auth add <server> <token>' 存储认证信息"
         case .keychainUnexpectedStatus:
             return "请在系统设置中检查钥匙串访问权限"
         case .serverConnectionFailed:
             return "请检查服务器地址与网络连接"
         case .serverAuthenticationFailed:
-            return "用 'ntfy-macos auth list' 核对认证令牌"
+            return "用 'ntfyx auth list' 核对认证令牌"
         case .serverTimeout:
             return "请确认服务器是否可达"
         case .serverInvalidURL:
@@ -145,7 +145,7 @@ enum NtfyError: Error, LocalizedError, Sendable {
         case .scriptNotExecutable:
             return "运行 'chmod +x <script-path>' 赋予脚本执行权限"
         case .notificationPermissionDenied:
-            return "前往 系统设置 → 通知 → ntfy-macos 开启通知"
+            return "前往 系统设置 → 通知 → ntfyx 开启通知"
         case .localServerPortInUse:
             return "请在 config.yml 中更换端口"
         default:

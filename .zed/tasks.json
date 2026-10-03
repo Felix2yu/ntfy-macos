@@ -25,7 +25,7 @@
   },
   {
     "label": "SwiftPM: run",
-    "command": "swift run ntfy-macos"
+    "command": "swift run ntfyx"
   },
   {
     "label": "SwiftPM: test",

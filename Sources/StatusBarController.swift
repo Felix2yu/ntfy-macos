@@ -57,7 +57,7 @@ class StatusBarController: NSObject {
                 image.isTemplate = true // Makes it adapt to light/dark mode
                 button.image = image
             }
-            button.toolTip = "ntfy-macos"
+            button.toolTip = "ntfyx"
         }
 
         setupMenu()
@@ -124,7 +124,7 @@ class StatusBarController: NSObject {
 
         menu?.addItem(NSMenuItem.separator())
 
-        let aboutItem = NSMenuItem(title: "关于 ntfy-macos", action: #selector(showAbout), keyEquivalent: "")
+        let aboutItem = NSMenuItem(title: "关于 ntfyx", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         aboutItem.isEnabled = true
         menu?.addItem(aboutItem)
@@ -145,7 +145,7 @@ class StatusBarController: NSObject {
     }
 
     @objc func showConfigInFinder() {
-        let configPath = NSString(string: "~/.config/ntfy-macos").expandingTildeInPath
+        let configPath = NSString(string: "~/.config/ntfyx").expandingTildeInPath
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: configPath)
     }
 
@@ -197,14 +197,14 @@ class StatusBarController: NSObject {
             backing: .buffered,
             defer: false
         )
-        window.title = "关于 ntfy-macos"
+        window.title = "关于 ntfyx"
         window.center()
         window.isReleasedWhenClosed = false  // Keep window object alive after closing
 
         let contentView = NSView(frame: window.contentView!.bounds)
 
         // Title
-        let titleLabel = NSTextField(labelWithString: "ntfy-macos")
+        let titleLabel = NSTextField(labelWithString: "ntfyx")
         titleLabel.font = NSFont.boldSystemFont(ofSize: 18)
         titleLabel.frame = NSRect(x: 20, y: 155, width: 300, height: 25)
         contentView.addSubview(titleLabel)
@@ -242,8 +242,8 @@ class StatusBarController: NSObject {
 
         attributedString.append(NSAttributedString(string: "\n", attributes: normalAttrs))
 
-        let githubLink = NSMutableAttributedString(string: "ntfy-macos on GitHub", attributes: linkAttrs)
-        githubLink.addAttribute(.link, value: "https://github.com/laurentftech/ntfy-macos", range: NSRange(location: 0, length: githubLink.length))
+        let githubLink = NSMutableAttributedString(string: "ntfyx on GitHub", attributes: linkAttrs)
+        githubLink.addAttribute(.link, value: "https://github.com/Felix2yu/ntfyx", range: NSRange(location: 0, length: githubLink.length))
         attributedString.append(githubLink)
 
         attributedString.append(NSAttributedString(string: "\n\n基于 ", attributes: normalAttrs))

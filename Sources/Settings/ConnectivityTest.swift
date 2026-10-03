@@ -79,7 +79,7 @@ enum ConnectivityTest {
         if let token, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = "来自 ntfy-macos 设置页的测试消息 \(formatter.string(from: Date()))".data(using: .utf8)
+        request.httpBody = "来自 ntfyx 设置页的测试消息 \(formatter.string(from: Date()))".data(using: .utf8)
 
         guard let (response) = try? await session.data(for: request),
               let http = response.1 as? HTTPURLResponse else {

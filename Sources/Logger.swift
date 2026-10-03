@@ -16,12 +16,12 @@ enum Log {
     /// Log directory
     static let logDirectory: String = {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        return homeDir.appendingPathComponent(".local/share/ntfy-macos/logs").path
+        return homeDir.appendingPathComponent(".local/share/ntfyx/logs").path
     }()
 
     /// Log file path
     static let logFilePath: String = {
-        return (logDirectory as NSString).appendingPathComponent("ntfy-macos.log")
+        return (logDirectory as NSString).appendingPathComponent("ntfyx.log")
     }()
 
     /// Maximum log file size (1 MB)

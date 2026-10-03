@@ -4,7 +4,7 @@ import AppKit
 /// own copy of these actions; both route to the same controllers.
 @MainActor
 enum MainMenu {
-    private static let appName = "ntfy-macos"
+    private static let appName = "ntfyx"
 
     static func install() {
         let mainMenu = NSMenu()
@@ -79,7 +79,7 @@ enum MainMenu {
 
     private static func helpMenu() -> NSMenuItem {
         let menu = NSMenu(title: "帮助")
-        menu.addItem(item("ntfy-macos 项目主页", #selector(MainMenuActions.openProjectHomepage), "", target: MainMenuActions.shared))
+        menu.addItem(item("ntfyx 项目主页", #selector(MainMenuActions.openProjectHomepage), "", target: MainMenuActions.shared))
         return container(title: "帮助", submenu: menu)
     }
 
@@ -108,7 +108,7 @@ final class MainMenuActions: NSObject {
     static let shared = MainMenuActions()
 
     @objc func openProjectHomepage() {
-        guard let url = URL(string: "https://github.com/laurentftech/ntfy-macos") else { return }
+        guard let url = URL(string: "https://github.com/Felix2yu/ntfyx") else { return }
         NSWorkspace.shared.open(url)
     }
 }

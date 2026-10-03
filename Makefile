@@ -4,7 +4,7 @@
 # - Does not modify source files
 
 SWIFT := swift
-PKG_NAME := ntfy-macos
+PKG_NAME := ntfyx
 
 SWIFT_BUILD_FLAGS ?=
 SWIFT_RUN_FLAGS ?=

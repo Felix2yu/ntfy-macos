@@ -11,7 +11,7 @@ final class LocalNotificationServer: @unchecked Sendable {
     private var listener: NWListener?
     private let port: UInt16
     private let maxBodySize = 4096
-    private let queue = DispatchQueue(label: "com.ntfy-macos.local-server")
+    private let queue = DispatchQueue(label: "com.ntfyx.local-server")
     /// Callback for handling notifications. Set to nil to disable notification display (useful for testing).
     var onNotification: (@Sendable (NtfyMessage) -> Void)?
 

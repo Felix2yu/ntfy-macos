@@ -51,7 +51,7 @@ struct SettingsView: View {
                     launchAtLogin = newValue
                 }
             ))
-            .help("登录后自动在菜单栏运行 ntfy-macos")
+            .help("登录后自动在菜单栏运行 ntfyx")
 
             if let loginError {
                 Text(loginError)
@@ -125,7 +125,7 @@ struct SettingsView: View {
             if isLocalServerEnabled {
                 commandRow(
                     label: "curl",
-                    command: "curl -X POST http://127.0.0.1:\(viewModel.localServerPort)/notify -H \"Content-Type: application/json\" -d '{\"title\": \"Hello\", \"message\": \"Hello from ntfy-macos!\"}'"
+                    command: "curl -X POST http://127.0.0.1:\(viewModel.localServerPort)/notify -H \"Content-Type: application/json\" -d '{\"title\": \"Hello\", \"message\": \"Hello from ntfyx!\"}'"
                 )
             }
         } header: {

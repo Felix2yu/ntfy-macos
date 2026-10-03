@@ -84,10 +84,10 @@ final class NotificationManager: NSObject, @unchecked Sendable {
                             print("💡 The app is now registered in System Settings.")
                             print("   To enable notifications manually:")
                             print("   1. Open System Settings → Notifications")
-                            print("   2. Scroll down and find 'ntfy-macos'")
+                            print("   2. Scroll down and find 'ntfyx'")
                             print("   3. Toggle on 'Allow Notifications'")
                             print("")
-                            print("   Then restart ntfy-macos")
+                            print("   Then restart ntfyx")
                         }
                         completion(granted, error)
                     }
@@ -101,10 +101,10 @@ final class NotificationManager: NSObject, @unchecked Sendable {
                 print("")
                 print("💡 To enable notifications:")
                 print("   1. Open System Settings → Notifications")
-                print("   2. Scroll down and find 'ntfy-macos' in the list")
+                print("   2. Scroll down and find 'ntfyx' in the list")
                 print("   3. Toggle on 'Allow Notifications'")
                 print("")
-                print("   Then restart ntfy-macos")
+                print("   Then restart ntfyx")
                 completion(false, nil)
             }
         }
@@ -373,7 +373,7 @@ final class NotificationManager: NSObject, @unchecked Sendable {
         let content = UNMutableNotificationContent()
         let emojiPrefix = EmojiTags.emojiPrefix(for: message.tags)
         // Use plain text versions to strip markdown syntax (macOS notifications don't render markdown)
-        content.title = emojiPrefix + (message.plainTextTitle ?? message.title ?? "ntfy-macos")
+        content.title = emojiPrefix + (message.plainTextTitle ?? message.title ?? "ntfyx")
         content.body = message.plainTextMessage ?? message.message ?? ""
         if passive {
             content.interruptionLevel = .passive

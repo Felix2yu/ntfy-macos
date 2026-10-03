@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "ntfy-macos",
+    name: "ntfyx",
     platforms: [
         .macOS(.v26)
     ],
     products: [
         .executable(
-            name: "ntfy-macos",
-            targets: ["ntfy-macos"]
+            name: "ntfyx",
+            targets: ["ntfyx"]
         )
     ],
     dependencies: [
@@ -17,15 +17,15 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "ntfy-macos",
+            name: "ntfyx",
             dependencies: ["Yams"],
             path: "Sources",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(
-            name: "ntfy-macosTests",
-            dependencies: ["ntfy-macos", "Yams"],
-            path: "Tests/ntfy-macosTests",
+            name: "ntfyxTests",
+            dependencies: ["ntfyx", "Yams"],
+            path: "Tests/ntfyxTests",
             linkerSettings: [.linkedLibrary("sqlite3")]
         )
     ]

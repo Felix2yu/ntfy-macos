@@ -33,7 +33,7 @@ class SettingsWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "ntfy-macos 设置"
+        window.title = "ntfyx 设置"
         window.isReleasedWhenClosed = false
         window.contentViewController = hostingController
         window.minSize = NSSize(width: 560, height: 460)

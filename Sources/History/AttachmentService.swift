@@ -18,11 +18,11 @@ enum AttachmentService {
         }
     }
 
-    /// ~/Library/Caches/ntfy-macos/attachments
+    /// ~/Library/Caches/ntfyx/attachments
     static var cacheDirectory: URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
-        return caches.appendingPathComponent("ntfy-macos/attachments", isDirectory: true)
+        return caches.appendingPathComponent("ntfyx/attachments", isDirectory: true)
     }
 
     /// Downloads the attachment (reusing a cached copy when present) and returns the local file URL.

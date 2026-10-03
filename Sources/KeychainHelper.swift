@@ -9,7 +9,7 @@ enum KeychainError: Error {
 }
 
 struct KeychainHelper {
-    private static let service = "com.ntfy-macos.auth"
+    private static let service = "com.ntfyx.auth"
 
     /// Stores an authentication token in the Keychain for a given server URL.
     /// This function performs an "upsert": it updates the token if it exists, or adds it if it doesn't.

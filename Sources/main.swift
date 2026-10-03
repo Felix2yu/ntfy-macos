@@ -4,7 +4,7 @@ import AppKit
 
 /// App constants
 enum AppConstants {
-    static let bundleIdentifier = "com.laurentftech.ntfy-macos"
+    static let bundleIdentifier = "com.laurentftech.ntfyx"
 
     /// Returns the bundle identifier, falling back to hardcoded value if running via symlink
     static var effectiveBundleIdentifier: String {
@@ -48,7 +48,7 @@ struct ClientSpec: Hashable {
     let authToken: String?
 }
 
-final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
+final class Ntfyx: NtfyClientDelegate, @unchecked Sendable {
     private var clientBySpec: [ClientSpec: NtfyClient] = [:]
     private var clientToServer: [ObjectIdentifier: ClientSpec] = [:]  // which spec drove each client
     private var connectedSpecs: Set<ClientSpec> = []  // audit 2.6: per-connection state
@@ -179,7 +179,7 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
     }
 
     func serve(configPath: String? = nil) {
-        Log.info("Starting ntfy-macos service...")
+        Log.info("Starting ntfyx service...")
 
         do {
             try ConfigManager.shared.loadConfig(from: configPath)
@@ -209,7 +209,7 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
             fatalStartup("未配置任何主题。")
         }
 
-        Log.info("ntfy-macos v\(AppConstants.effectiveVersion) starting...")
+        Log.info("ntfyx v\(AppConstants.effectiveVersion) starting...")
         Log.info("Configured servers: \(config.servers.count)")
         for server in config.servers {
             let topics = server.topics.map { $0.name }.joined(separator: ", ")
@@ -263,7 +263,7 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
                             self.connectClients()
                         } else {
                             Log.error("Notification permission not granted")
-                            Log.info("   Please enable notifications in System Settings → Notifications → ntfy-macos")
+                            Log.info("   Please enable notifications in System Settings → Notifications → ntfyx")
                             if AppMode.isDockApp {
                                 // Keep the window open so the user can read history and
                                 // retry from System Settings without losing the app.
@@ -483,7 +483,7 @@ final class NtfyMacOS: NtfyClientDelegate, @unchecked Sendable {
 struct CLI {
     // Keep a strong reference to prevent deallocation
     @MainActor
-    static var ntfyAppInstance: NtfyMacOS?
+    static var ntfyAppInstance: Ntfyx?
 
     @MainActor
     static func main() -> Bool {
@@ -492,12 +492,12 @@ struct CLI {
         // When launched without arguments (e.g., via double-click or `open`),
         // start serve mode directly
         if arguments.count < 2 {
-            print("🚀 正在启动 ntfy-macos 服务…")
-            ntfyAppInstance = NtfyMacOS()
+            print("🚀 正在启动 ntfyx 服务…")
+            ntfyAppInstance = Ntfyx()
             ntfyAppInstance?.serve(configPath: nil)
 
             guard ConfigManager.shared.config != nil else {
-                print("配置无效。请运行 'ntfy-macos serve' 创建示例配置。")
+                print("配置无效。请运行 'ntfyx serve' 创建示例配置。")
                 return false
             }
 
@@ -520,7 +520,7 @@ struct CLI {
         switch command {
         case "serve":
             let configPath = getFlag(arguments: arguments, flag: "--config")
-            ntfyAppInstance = NtfyMacOS()
+            ntfyAppInstance = Ntfyx()
             ntfyAppInstance?.serve(configPath: configPath)
 
             // Extract config for later use
@@ -571,9 +571,9 @@ struct CLI {
 
         switch subcommand {
         case "add":
-            // ntfy-macos auth add <server-url> <token>
+            // ntfyx auth add <server-url> <token>
             guard arguments.count >= 5 else {
-                print("用法：ntfy-macos auth add <server-url> <token>")
+                print("用法：ntfyx auth add <server-url> <token>")
                 exit(1)
             }
             let server = arguments[3]
@@ -588,7 +588,7 @@ struct CLI {
             }
 
         case "list":
-            // ntfy-macos auth list
+            // ntfyx auth list
             do {
                 let servers = try KeychainHelper.listServers()
                 if servers.isEmpty {
@@ -605,9 +605,9 @@ struct CLI {
             }
 
         case "remove":
-            // ntfy-macos auth remove <server-url>
+            // ntfyx auth remove <server-url>
             guard arguments.count >= 4 else {
-                print("用法：ntfy-macos auth remove <server-url>")
+                print("用法：ntfyx auth remove <server-url>")
                 exit(1)
             }
             let server = arguments[3]
@@ -629,7 +629,7 @@ struct CLI {
 
     static func printAuthUsage() {
         print("""
-        用法：ntfy-macos auth <子命令>
+        用法：ntfyx auth <子命令>
 
         子命令：
             add <server-url> <token>    将令牌存入钥匙串
@@ -637,16 +637,16 @@ struct CLI {
             remove <server-url>         从钥匙串删除令牌
 
         示例：
-            ntfy-macos auth add https://ntfy.sh tk_mytoken
-            ntfy-macos auth list
-            ntfy-macos auth remove https://ntfy.sh
+            ntfyx auth add https://ntfy.sh tk_mytoken
+            ntfyx auth list
+            ntfyx auth remove https://ntfy.sh
         """)
     }
 
     @MainActor
     static func handleTestNotify(arguments: [String]) {
         guard let topic = getFlag(arguments: arguments, flag: "--topic") else {
-            print("用法：ntfy-macos test-notify --topic <NAME>")
+            print("用法：ntfyx test-notify --topic <NAME>")
             exit(1)
         }
 
@@ -681,7 +681,7 @@ struct CLI {
         do {
             if try ConfigManager.createSampleConfig(at: configPath) {
                 print("示例配置已创建于：\(configPath)")
-                print("请编辑配置文件，然后运行 'ntfy-macos serve' 启动服务。")
+                print("请编辑配置文件，然后运行 'ntfyx serve' 启动服务。")
             } else {
                 print("配置文件已存在，未做修改：\(configPath)")
             }
@@ -701,10 +701,10 @@ struct CLI {
 
     static func printUsage() {
         print("""
-        ntfy-macos - 原生 macOS 通知与自动化工具
+        ntfyx - 原生 macOS 通知与自动化工具
 
         用法：
-            ntfy-macos <命令> [选项]
+            ntfyx <命令> [选项]
 
         命令：
             serve                    启动通知服务
@@ -725,31 +725,31 @@ struct CLI {
 
         示例：
             # 创建配置
-            ntfy-macos init
+            ntfyx init
 
             # 将认证令牌存入钥匙串
-            ntfy-macos auth add https://ntfy.sh tk_mytoken
+            ntfyx auth add https://ntfy.sh tk_mytoken
 
             # 列出已存储的令牌
-            ntfy-macos auth list
+            ntfyx auth list
 
             # 删除令牌
-            ntfy-macos auth remove https://ntfy.sh
+            ntfyx auth remove https://ntfy.sh
 
             # 启动服务
-            ntfy-macos serve
+            ntfyx serve
 
             # 测试通知
-            ntfy-macos test-notify --topic alerts
+            ntfyx test-notify --topic alerts
 
         配置：
-            默认配置位置：~/.config/ntfy-macos/config.yml
+            默认配置位置：~/.config/ntfyx/config.yml
 
             令牌可存放于：
             - 配置文件中（各服务器下的 token: 字段）
             - 钥匙串中（使用 'auth add' 命令）——更安全
 
-        更多信息请访问：https://github.com/laurentftech/ntfy-macos
+        更多信息请访问：https://github.com/Felix2yu/ntfyx
         """)
     }
 }
@@ -778,7 +778,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let uid = getuid()
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        task.arguments = ["bootout", "gui/\(uid)/homebrew.mxcl.ntfy-macos"]
+        task.arguments = ["bootout", "gui/\(uid)/homebrew.mxcl.ntfyx"]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         try? task.run()

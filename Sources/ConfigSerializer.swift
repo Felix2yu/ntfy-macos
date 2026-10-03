@@ -35,7 +35,7 @@ extension ConfigManager {
 /// document stays as valid as the encoded body.
 enum ConfigTextMerger {
     static let defaultHeader = [
-        "# ntfy-macos configuration",
+        "# ntfyx configuration",
         "# Edit manually or use Settings in the menu bar",
     ]
 

@@ -3,8 +3,8 @@ import CoreGraphics
 import ImageIO
 
 // Rasterizes the geometry in Resources/ntfy-icon.svg (same 1024 coordinate space)
-// into the PNGs that `iconutil` packs into Resources/ntfy-macos.icns.
-// Usage: swiftc -O tools/render-icon.swift -o /tmp/render-icon && /tmp/render-icon /tmp/ntfy.iconset && iconutil -c icns /tmp/ntfy.iconset -o Resources/ntfy-macos.icns
+// into the PNGs that `iconutil` packs into Resources/ntfyx.icns.
+// Usage: swiftc -O tools/render-icon.swift -o /tmp/render-icon && /tmp/render-icon /tmp/ntfy.iconset && iconutil -c icns /tmp/ntfy.iconset -o Resources/ntfyx.icns
 
 func renderIcon(size: Int, to url: URL) {
     let s = CGFloat(size) / 1024.0

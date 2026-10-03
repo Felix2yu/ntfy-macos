@@ -66,11 +66,11 @@ actor MessageStore {
         try MessageStore(dbPath: ":memory:")
     }
 
-    /// Default on-disk location: ~/Library/Application Support/ntfy-macos/history.db
+    /// Default on-disk location: ~/Library/Application Support/ntfyx/history.db
     static var defaultDatabasePath: String {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
-        return appSupport.appendingPathComponent("ntfy-macos/history.db").path
+        return appSupport.appendingPathComponent("ntfyx/history.db").path
     }
 
     // MARK: - Upsert

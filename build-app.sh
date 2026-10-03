@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "Building ntfy-macos app bundle..."
+echo "Building ntfyx app bundle..."
 
 # Build the executable
 swift build -c release
 
 # Create app bundle structure
-APP_NAME="ntfy-macos"
+APP_NAME="ntfyx"
 APP_BUNDLE="$APP_NAME.app"
 BUILD_DIR=".build/release"
 
@@ -22,7 +22,7 @@ cp "$BUILD_DIR/$APP_NAME" "$BUILD_DIR/$APP_BUNDLE/Contents/MacOS/"
 cp "Resources/Info.plist" "$BUILD_DIR/$APP_BUNDLE/Contents/"
 
 # Copy icon
-cp "Resources/ntfy-macos.icns" "$BUILD_DIR/$APP_BUNDLE/Contents/Resources/"
+cp "Resources/ntfyx.icns" "$BUILD_DIR/$APP_BUNDLE/Contents/Resources/"
 
 # Ad-hoc sign the app bundle (required for notifications to work)
 echo "Signing app bundle..."
