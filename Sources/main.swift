@@ -224,6 +224,13 @@ final class Ntfyx: NtfyClientDelegate, @unchecked Sendable {
         configWatcher = ConfigWatcher(configPath: configPath)
         configWatcher?.startWatching { [weak self] in
             self?.reloadConfig()
+            Task { @MainActor in
+                ConfigSyncService.shared.noteLocalConfigChanged()
+            }
+        }
+
+        Task { @MainActor in
+            ConfigSyncService.shared.start()
         }
     }
 
@@ -541,6 +548,10 @@ struct CLI {
             handleAuth(arguments: arguments)
             return false
 
+        case "sync":
+            handleSync(arguments: arguments)
+            return false
+
         case "test-notify":
             handleTestNotify(arguments: arguments)
             return true // Needs RunLoop
@@ -625,6 +636,147 @@ struct CLI {
             printAuthUsage()
             exit(1)
         }
+    }
+
+    @MainActor
+    static func handleSync(arguments: [String]) {
+        guard arguments.count >= 3 else {
+            printSyncUsage()
+            exit(1)
+        }
+        let subcommand = arguments[2]
+
+        let enabled = UserDefaults.standard.bool(forKey: AppSettings.iCloudSyncEnabledKey)
+        let storedDirectory = UserDefaults.standard.string(forKey: AppSettings.iCloudSyncDirectoryKey) ?? ""
+        // --dir applies to this run only: a one-off sync from a script or a second account
+        // must not quietly repoint the app's own sync folder.
+        let cliDirectory = getFlag(arguments: arguments, flag: "--dir")
+        let isCustom = !(cliDirectory ?? storedDirectory).isEmpty
+        let store = CloudConfigStore(directoryOverride: cliDirectory ?? (storedDirectory.isEmpty ? nil : storedDirectory))
+
+        switch subcommand {
+        case "status":
+            printSyncStatus(store: store, enabled: enabled, isCustom: isCustom)
+
+        case "pull", "push":
+            guard enabled || cliDirectory != nil else {
+                print("❌ iCloud 同步未开启。先在 ntfyx 设置 → iCloud 同步 中打开，或用 --dir <PATH> 指定同步文件夹。")
+                exit(1)
+            }
+
+            do {
+                try ConfigManager.shared.loadConfig(from: nil)
+            } catch {
+                print("❌ 读取本地配置失败：\(error)")
+                print("   默认配置位置：\(ConfigManager.defaultConfigPath)，可先运行 'ntfyx init' 创建。")
+                exit(1)
+            }
+            guard let local = ConfigManager.shared.config else {
+                print("❌ 未找到默认配置文件：\(ConfigManager.defaultConfigPath)")
+                exit(1)
+            }
+
+            let preferCloud = subcommand == "pull"
+            print(preferCloud ? "🔄 正在拉取云端配置（冲突以云端为准）…" : "🔄 正在推送本机配置（冲突以本机为准）…")
+
+            var state = SyncStateStore.load()
+            do {
+                let outcome = try ConfigSyncEngine.run(
+                    local: local,
+                    base: state.base ?? .empty,
+                    resolution: preferCloud ? .preferCloud : .preferLocal,
+                    store: store
+                )
+                state.base = outcome.merged
+                state.lastCloudFingerprint = outcome.cloudFingerprint
+                state.lastSyncedAt = Date()
+                SyncStateStore.save(state)
+
+                print("✅ 同步完成：\(outcome.servers) 个服务器、\(outcome.topics) 个主题")
+                print(outcome.wroteLocal
+                    ? "   本机配置已更新：\(ConfigManager.defaultConfigPath)"
+                    : "   本机配置无需改动")
+                print(outcome.wroteCloud
+                    ? "   云端文件已写入：\(store.cloudFileURL.path)"
+                    : "   云端文件无需改动")
+                if outcome.conflictCopiesMerged > 0 {
+                    print("   已合并并清理 \(outcome.conflictCopiesMerged) 个 iCloud 冲突副本")
+                }
+                print("   上传与下载由系统在后台完成，其他设备稍后才看得到。")
+                if outcome.wroteLocal {
+                    print("   ntfyx 正在运行的话会自动热重载这份配置。")
+                }
+            } catch {
+                print("❌ 同步失败：\(error.localizedDescription)")
+                if let syncError = error as? ConfigSyncError, case .cloudNotDownloaded = syncError {
+                    print("   已向 iCloud 请求下载云端副本，稍后重试即可。")
+                }
+                exit(1)
+            }
+
+        default:
+            print("未知的 sync 子命令：\(subcommand)")
+            printSyncUsage()
+            exit(1)
+        }
+    }
+
+    static func printSyncStatus(store: CloudConfigStore, enabled: Bool, isCustom: Bool) {
+        print("iCloud 同步：\(enabled ? "已开启" : "未开启")")
+        print("同步文件夹：\(store.rootDirectory)\(isCustom ? "（自定义）" : "")")
+
+        let cloudPath = store.cloudFileURL.path
+        if FileManager.default.fileExists(atPath: cloudPath) {
+            let size = ((try? FileManager.default.attributesOfItem(atPath: cloudPath))?[.size] as? Int) ?? 0
+            print("云端文件：已存在（\(size) 字节）")
+        } else {
+            print("云端文件：尚不存在（首次同步时创建）")
+        }
+
+        let state = SyncStateStore.load()
+        if let base = state.base {
+            print("本机基线：\(base.servers.count) 个服务器、\(base.topicCount) 个主题")
+        } else {
+            print("本机基线：尚无（这台机器还没完成过同步）")
+        }
+        if let date = state.lastSyncedAt {
+            print("上次同步：\(date.formatted(date: .abbreviated, time: .shortened))")
+        } else {
+            print("上次同步：从未")
+        }
+
+        let conflicts = store.conflictCopies().count
+        if conflicts > 0 {
+            print("冲突副本：\(conflicts) 个，下次同步会合并进来")
+        }
+        if !enabled {
+            print("")
+            print("未开启时 pull/push 需要 --dir <PATH> 指定同步文件夹；持续同步由设置中的开关控制。")
+        }
+    }
+
+    static func printSyncUsage() {
+        print("""
+        用法：ntfyx sync <子命令> [--dir <PATH>]
+
+        子命令：
+            status          显示同步状态（只读）
+            pull            取云端配置合并到本机，冲突以云端为准
+            push            把本机配置合入云端，冲突以本机为准
+
+        pull 与 push 都会把合并结果同时写回本机文件和云端文件，区别只在冲突时以哪边
+        为准；服务器与主题的新增取并集，任一边删除都生效。
+
+        --dir 只作用于本次运行，不会改动设置里的同步文件夹。
+
+        示例：
+            ntfyx sync status
+            ntfyx sync pull
+            ntfyx sync push --dir /Volumes/nas/ntfyx
+
+        注意：命令行只做一次合并。配置改动自动上云、定时拉取这些持续同步，
+        仍由运行中的 ntfyx 服务负责。
+        """)
     }
 
     static func printAuthUsage() {
@@ -715,6 +867,11 @@ struct CLI {
                 list                 列出所有已存令牌的服务器
                 remove <url>         删除某服务器的令牌
 
+            sync <子命令>            iCloud 配置同步（--dir <PATH> 可临时指定同步文件夹）
+                status               显示同步状态（只读）
+                pull                 取云端配置合并到本机，冲突以云端为准
+                push                 把本机配置合入云端，冲突以本机为准
+
             test-notify              发送测试通知
                 --topic <NAME>       要测试的主题名称
 
@@ -735,6 +892,9 @@ struct CLI {
 
             # 删除令牌
             ntfyx auth remove https://ntfy.sh
+
+            # 新机器上先把云端的配置拉下来
+            ntfyx sync pull
 
             # 启动服务
             ntfyx serve
