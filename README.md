@@ -6,7 +6,7 @@
 [![macOS 26+](https://img.shields.io/badge/macOS-26%2B-brightgreen.svg)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6-orange.svg)](https://swift.org/)
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-brown.svg)](https://github.com/laurentftech/homebrew-ntfy-macos)
-[![Tests](https://img.shields.io/badge/Tests-320-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-342-brightgreen.svg)]()
 
 在 Mac 上接收来自任何来源的推送通知——服务器、IoT 设备、智能家居、CI 流水线或自定义脚本。无需注册账号，既可使用公共 [ntfy.sh](https://ntfy.sh) 服务，也支持自建服务器。
 
@@ -28,6 +28,10 @@
 - **双运行形态**：双击 / `open` 打开是带 Dock 图标的主窗口应用，`serve` 启动则作为纯后台菜单栏服务
 - **配置热重载**：自动检测并应用配置变更
 - **配置校验**：在菜单栏提示未知配置项和拼写错误
+- **服务器主题浏览**：历史窗口列出服务器上已有消息的主题，一键订阅，不必手打主题名
+- **跨设备同步**：已读与删除都会写回服务器，批量已读按每请求 50 个 id 合并发送
+- **主题退役**：可调用服务器端清理，缓存消息与附件一并删除；服务器已无缓存的主题仍会列在本地供清理
+- **Dock 未读角标**：Dock 图标显示历史库中的未读总数（超过 99 显示 `99+`）
 - **点击打开**：点击通知在浏览器中打开链接（可按主题配置）
 - **已读 / 删除跨设备同步**：历史窗口中的已读、删除操作会同步到服务端，其他设备的同类操作也会回写本地状态并撤销已弹出的通知横幅
 - **自动请求权限**：首次启动时自动请求通知权限
