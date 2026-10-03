@@ -35,7 +35,6 @@ xcuserdata/
 # Configuration (for testing)
 config.yml
 test-config.yml
-homebrew/ntfyx.rb
 
 # Other
 BUILD_SUMMARY.md

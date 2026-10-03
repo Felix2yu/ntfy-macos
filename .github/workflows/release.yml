@@ -60,89 +60,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Update Homebrew tap
-        env:
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.VERSION }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          if [ -z "$TAP_GITHUB_TOKEN" ]; then
-            echo "TAP_GITHUB_TOKEN not set, skipping Homebrew tap update"
-            exit 0
-          fi
-          
-          SOURCE_URL="https://github.com/${REPOSITORY}/archive/refs/tags/${VERSION}.tar.gz"
-          wget -q -O "source.tar.gz" "${SOURCE_URL}"
-          SHA256=$(shasum -a 256 "source.tar.gz" | awk '{print $1}')
-          
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # The tap lives under its own owner, not alongside this repo, so it is not
-          # derived from github.repository.
-          git clone https://github.com/laurentftech/homebrew-ntfy-macos.git tap
-          cd tap
-          
-          cat > Formula/ntfyx.rb << 'FORMULA'
-          class Ntfyx < Formula
-            desc "Native macOS CLI notifier and automation agent for ntfy"
-            homepage "https://github.com/Felix2yu/ntfyx"
-            url "SOURCE_URL_PLACEHOLDER"
-            sha256 "SHA256_PLACEHOLDER"
-            license "MIT"
-            version "VERSION_PLACEHOLDER"
-            head "https://github.com/Felix2yu/ntfyx.git", branch: "main"
-          
-            depends_on xcode: ["26.0", :build]
-            depends_on :macos
-          
-            def install
-              system "swift", "build", "-c", "release", "--disable-sandbox"
-              
-              app_name = "ntfyx"
-              app_bundle = "#{app_name}.app"
-              build_dir = ".build/release"
-              
-              mkdir_p "#{build_dir}/#{app_bundle}/Contents/MacOS"
-              mkdir_p "#{build_dir}/#{app_bundle}/Contents/Resources"
-              
-              cp "#{build_dir}/#{app_name}", "#{build_dir}/#{app_bundle}/Contents/MacOS/"
-              cp "Resources/Info.plist", "#{build_dir}/#{app_bundle}/Contents/"
-              cp "Resources/ntfyx.icns", "#{build_dir}/#{app_bundle}/Contents/Resources/"
-              
-              system "codesign", "--force", "--deep", "--sign", "-", "#{build_dir}/#{app_bundle}"
-              
-              prefix.install "#{build_dir}/#{app_bundle}"
-              bin.install_symlink prefix/"#{app_bundle}/Contents/MacOS/#{app_name}"
-            end
-          
-            service do
-              run [opt_prefix/"ntfyx.app/Contents/MacOS/ntfyx", "serve"]
-              keep_alive crashed: true
-              log_path var/"log/ntfyx/stdout.log"
-              error_log_path var/"log/ntfyx/stderr.log"
-            end
-
-            def caveats
-              <<~EOS
-                To add ntfyx to Launchpad:
-                  sudo ln -sf #{opt_prefix}/ntfyx.app /Applications/
-              EOS
-            end
-
-            test do
-              system bin/"ntfyx", "help"
-            end
-          end
-          FORMULA
-          
-          sed -i '' "s|SOURCE_URL_PLACEHOLDER|${SOURCE_URL}|g" Formula/ntfyx.rb
-          sed -i '' "s|SHA256_PLACEHOLDER|${SHA256}|g" Formula/ntfyx.rb
-          sed -i '' "s|VERSION_PLACEHOLDER|${VERSION}|g" Formula/ntfyx.rb
-          
-          git add Formula/ntfyx.rb
-          git commit -m "Update ntfyx to ${VERSION}"
-          git push https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/laurentftech/homebrew-ntfy-macos.git main
-
       - name: Notify via ntfy
         if: always()
         env:
@@ -161,7 +78,7 @@ jobs:
               -H "Title: ntfyx ${VERSION} released" \
               -H "Priority: 3" \
               -H "Tags: tada,rocket" \
-              -d "Release ${VERSION} published successfully. Homebrew tap updated."
+              -d "Release ${VERSION} published successfully."
           else
             curl -s -X POST "https://ntfy.sh/$NTFY_TOPIC" \
               -H "Title: ntfyx ${VERSION} release failed" \
