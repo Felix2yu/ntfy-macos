@@ -6,6 +6,7 @@ import AppKit
 /// windows here live for the app's lifetime and are recreated by their
 /// controllers; a stale window object keeps the autosave name claimed, so
 /// subsequent setFrameAutosaveName calls return false with no restore and no save.
+@MainActor
 enum WindowFramePersistence {
     /// Restores a previously saved frame if it is valid and intersects a
     /// currently attached screen; otherwise centers the window.

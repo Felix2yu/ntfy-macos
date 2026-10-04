@@ -448,7 +448,7 @@ final class Ntfyx: NtfyClientDelegate, @unchecked Sendable {
         guard let store = messageStore, let serverURL = clientToServer[ObjectIdentifier(client)]?.serverURL else { return }
 
         Task {
-            try? await store.applyActionEvent(event, serverURL: serverURL)
+            _ = try? await store.applyActionEvent(event, serverURL: serverURL)
             // The banner lives in Notification Center, not in the history database:
             // a remote read or delete has to withdraw it explicitly.
             if let messageID = try? await store.targetMessageID(for: event, serverURL: serverURL) {

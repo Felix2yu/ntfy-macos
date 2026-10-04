@@ -419,7 +419,7 @@ final class HistoryViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             // 1. Local tombstone first (authoritative for the UI).
-            try? await self.store.tombstoneMessage(
+            _ = try? await self.store.tombstoneMessage(
                 serverURL: ref.serverURL, topic: ref.topic, messageID: stored.message.id
             )
             NotificationManager.shared.revoke(messageIDs: [stored.message.id])

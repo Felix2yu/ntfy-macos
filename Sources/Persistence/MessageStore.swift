@@ -462,7 +462,7 @@ actor MessageStore {
     /// Whether a physical row exists regardless of read/tombstone flags (an expired
     /// tombstone must be gone for good; UI queries filter them out and can't tell).
     func rawRowExists(serverURL: String, topic: String, messageID: String) throws -> Bool {
-        let rows = try db.query(
+        let rows: [()] = try db.query(
             "SELECT 1 FROM messages WHERE server_url = ? AND topic = ? AND msg_id = ?",
             bind: { statement in
                 try statement.bindText(serverURL, at: 1)
