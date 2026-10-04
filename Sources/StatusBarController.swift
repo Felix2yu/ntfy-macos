@@ -202,8 +202,9 @@ class StatusBarController: NSObject {
     }
 
     @objc func showAbout() {
-        // Reuse existing window if already open
-        if let existingWindow = aboutWindow, existingWindow.isVisible {
+        // Reuse the window even after it has been closed: a fresh one per reopen would leak
+        // both the old window and its close observer, which is registered once per window.
+        if let existingWindow = aboutWindow {
             existingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return

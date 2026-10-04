@@ -5,9 +5,12 @@ import UserNotifications
 /// Helper to show a window that makes notification permission dialogs appear
 @MainActor
 class PermissionHelper {
-    private static var window: NSWindow?
-    private static var completion: ((Bool) -> Void)?
+    // Internal rather than private: talking to User Notifications needs a bundled app, so the
+    // close-handling tests wire these up directly instead of going through the entry point.
+    static var window: NSWindow?
+    static var completion: ((Bool) -> Void)?
     private static var label: NSTextField?
+    private static var button: NSButton?
 
     static func requestPermissionsWithWindow(completion: @escaping @Sendable (Bool) -> Void) {
         // First check if already authorized - if so, skip the window entirely
@@ -24,16 +27,26 @@ class PermissionHelper {
         }
     }
 
-    private static func showPermissionWindow(completion: @escaping @Sendable (Bool) -> Void) {
-        self.completion = completion
-
-        // Create the window
+    /// A window allocated here has `isReleasedWhenClosed` on by default, so `close()` would
+    /// drop a retain the static reference never gave up. The second release then surfaces as
+    /// a wild `objc_release` when the main run loop drains its autorelease pool.
+    static func makePermissionWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 250),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
+        return window
+    }
+
+    private static func showPermissionWindow(completion: @escaping @Sendable (Bool) -> Void) {
+        self.completion = completion
+
+        // Create the window
+        let window = makePermissionWindow()
+        window.delegate = PermissionHelperTarget.shared
         self.window = window
 
         window.title = "ntfyx - 通知权限设置"
@@ -56,6 +69,7 @@ class PermissionHelper {
         button.target = PermissionHelperTarget.shared
         button.action = #selector(PermissionHelperTarget.requestPermissionClicked)
         button.isEnabled = false
+        self.button = button
         contentView.addSubview(button)
 
         window.contentView = contentView
@@ -100,6 +114,9 @@ class PermissionHelper {
 
     static func requestPermission() {
         label?.stringValue = "正在请求权限…"
+        // The system dialog takes a moment; a second click would queue another authorization
+        // request and another finish() on the same window.
+        button?.isEnabled = false
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             DispatchQueue.main.async {
@@ -136,19 +153,34 @@ class PermissionHelper {
     }
 
     static func finish(granted: Bool) {
-        let callback = completion
-        completion = nil
+        // Detach before closing, so AppKit's own close does not look like the user walking
+        // away and turn a granted result into a denial.
+        window?.delegate = nil
         window?.close()
+        deliver(granted: granted)
+    }
+
+    /// Closing the window from the title bar abandons the permission flow. Without this the
+    /// pending callback never fires, so the app neither starts the clients nor exits and sits
+    /// there silently doing nothing.
+    static func userClosedWindow() {
+        deliver(granted: false)
+    }
+
+    private static func deliver(granted: Bool) {
+        guard let callback = completion else { return }
+        completion = nil
         window = nil
         label = nil
+        button = nil
         AppMode.demoteToAccessoryIfNeeded()
-        callback?(granted)
+        callback(granted)
     }
 }
 
 // Separate target class to handle button actions (avoids @objc issues with static methods)
 @MainActor
-class PermissionHelperTarget: NSObject {
+class PermissionHelperTarget: NSObject, NSWindowDelegate {
     static let shared = PermissionHelperTarget()
 
     private override init() {
@@ -164,6 +196,14 @@ class PermissionHelperTarget: NSObject {
     @objc func openSettings() {
         Task { @MainActor in
             PermissionHelper.openSystemSettings()
+        }
+    }
+
+    nonisolated func windowWillClose(_ notification: Notification) {
+        // Deferred: releasing the window from inside its own close notification would leave
+        // AppKit working on a deallocated object.
+        Task { @MainActor in
+            PermissionHelper.userClosedWindow()
         }
     }
 }
