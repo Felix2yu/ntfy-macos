@@ -437,21 +437,12 @@ final class ConfigManager: @unchecked Sendable {
     /// Returns false when a file is already there — an existing config is never overwritten.
     @discardableResult
     static func createSampleConfig(at path: String? = nil) throws -> Bool {
-        let configPath = path ?? defaultConfigPath
-        let url = URL(fileURLWithPath: configPath)
-        let directory = url.deletingLastPathComponent()
+        try writeNewConfig(sampleConfigYAML, at: path)
+    }
 
-        if FileManager.default.fileExists(atPath: configPath) {
-            return false
-        }
-
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
-
-        let sampleYAML = """
+    /// The documented example `ntfyx init` writes. Its servers are placeholders, so the
+    /// file is meant to be edited before anything subscribes to it.
+    static let sampleConfigYAML = """
         # ntfyx 配置文件
         # local_server_port: 9292  # 可选：启用本地 HTTP 服务器，供脚本触发通知
         servers:
@@ -488,7 +479,59 @@ final class ConfigManager: @unchecked Sendable {
                 silent: true
         """
 
-        try sampleYAML.write(to: url, atomically: true, encoding: .utf8)
+    /// Creates the file a first launch takes over: valid YAML with no subscriptions yet,
+    /// so the service starts right away and the user adds topics in Settings.
+    /// Returns false when a config already exists — it is never overwritten.
+    @discardableResult
+    static func createInitialConfig(at path: String? = nil) throws -> Bool {
+        try writeNewConfig(initialConfigYAML, at: path)
+    }
+
+    /// Empty on purpose: starting must never subscribe the user to a placeholder server.
+    /// The commented block below is the same example `ntfyx init` writes.
+    static let initialConfigYAML = """
+    # ntfyx 配置文件（首次启动自动生成）
+
+    # 订阅在这里的 servers 下配置，也可以点击菜单栏的 ntfyx 图标 → 设置，
+    # 保存后立刻生效，不用重启。手写的话照下面的示例来：
+    #
+    # servers:
+    #   - url: https://ntfy.sh
+    #     topics:
+    #       - name: alerts
+    #         icon_symbol: bell.fill
+    #   - url: https://your-private-server.com
+    #     # token: your_token_here  # 或用 'ntfyx auth add <服务器地址> <令牌>' 存入钥匙串
+    #     topics:
+    #       - name: deployments
+    #
+    # 更多可选项（运行 'ntfyx init' 可生成完整示例文件）：
+    #   fetch_missed: true           # 断线重连后补收离线期间的消息
+    #   silent: true                 # 静默通知
+    #   click_url: https://example.com  # 点击通知打开的链接，false 表示不打开
+    #   auto_run_script: /path/to/script.sh
+    #   actions: [{title: 确认, type: script, path: /path/to/script.sh}]
+    # local_server_port: 9292        # 可选：本地 HTTP 服务，供脚本触发通知
+
+    servers: []
+    """
+
+    /// Writes a brand-new config file, creating its directory first. Returns false when
+    /// the path is already taken.
+    private static func writeNewConfig(_ contents: String, at path: String?) throws -> Bool {
+        let configPath = path ?? defaultConfigPath
+        let url = URL(fileURLWithPath: configPath)
+
+        if FileManager.default.fileExists(atPath: configPath) {
+            return false
+        }
+
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try contents.write(to: url, atomically: true, encoding: .utf8)
         return true
     }
 

@@ -61,6 +61,10 @@ final class Ntfyx: NtfyClientDelegate, @unchecked Sendable {
     private var badgeSync: UnreadBadgeSync?
     private var historySync: HistorySyncService?
 
+    /// Set by serve() when this launch wrote the config file it then loaded: nothing is
+    /// subscribed yet, so the UI should go straight to Settings.
+    private(set) var didCreateInitialConfig = false
+
     /// Builds the desired client specs from a config: one per (server, fetch_missed group).
     static func clientSpecs(for config: AppConfig, authToken: (String) -> String?) -> [ClientSpec] {
         var specs: [ClientSpec] = []
@@ -184,17 +188,19 @@ final class Ntfyx: NtfyClientDelegate, @unchecked Sendable {
         do {
             try ConfigManager.shared.loadConfig(from: configPath)
         } catch ConfigError.fileNotFound {
-            // The sample always belongs next to the config that was actually requested,
+            // The starter always belongs next to the config that was actually requested,
             // never silently at the default path.
-            let samplePath = configPath ?? ConfigManager.defaultConfigPath
+            let starterPath = configPath ?? ConfigManager.defaultConfigPath
             do {
-                let created = try ConfigManager.createSampleConfig(at: samplePath)
-                fatalStartup("未找到配置文件。",
-                             details: created
-                                 ? "已在 \(samplePath) 创建示例配置。请编辑该文件后重新启动服务。"
-                                 : "请在 \(samplePath) 创建配置后重新启动服务。")
+                // A first launch owns the empty config it just wrote: the service keeps
+                // going and Settings fills it in, instead of making the user edit the
+                // file and start a second time.
+                try ConfigManager.createInitialConfig(at: starterPath)
+                try ConfigManager.shared.loadConfig(from: starterPath)
+                didCreateInitialConfig = true
+                Log.info("未找到配置文件，已在 \(starterPath) 创建初始配置。")
             } catch {
-                fatalStartup("未找到配置文件，且创建示例配置失败。", details: "\(error)")
+                fatalStartup("未找到配置文件，且创建初始配置失败。", details: "\(error)")
             }
         } catch {
             fatalStartup("加载配置失败。", details: "\(error)")
@@ -204,9 +210,8 @@ final class Ntfyx: NtfyClientDelegate, @unchecked Sendable {
             fatalStartup("配置无效。")
         }
 
-        let allTopics = config.allTopics.map { $0.name }
-        guard !allTopics.isEmpty else {
-            fatalStartup("未配置任何主题。")
+        if config.subscriptions.isEmpty {
+            Log.info("尚未配置任何主题：点击菜单栏的 ntfyx 图标 → 设置 添加订阅，保存后即时生效。")
         }
 
         Log.info("ntfyx v\(AppConstants.effectiveVersion) starting...")
@@ -508,13 +513,20 @@ struct CLI {
                 return false
             }
 
+            let firstLaunch = ntfyAppInstance?.didCreateInitialConfig ?? false
+
             // Schedule the actual service start for after RunLoop begins
             // Use Timer to ensure RunLoop is actively running
             Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [ntfyAppInstance] _ in
                 ntfyAppInstance?.startService()
                 if AppMode.isDockApp {
                     MainActor.assumeIsolated {
-                        HistoryWindowController.shared.showHistory()
+                        if firstLaunch {
+                            // Nothing to read yet; the point is to get the first subscription in.
+                            SettingsWindowController.shared.showSettings()
+                        } else {
+                            HistoryWindowController.shared.showHistory()
+                        }
                     }
                 }
             }
