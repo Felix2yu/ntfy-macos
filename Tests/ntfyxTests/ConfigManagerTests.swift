@@ -206,6 +206,31 @@ final class ConfigManagerTests: XCTestCase {
         XCTAssertEqual(content, userConfig)
     }
 
+    /// A first launch has to keep running on the file it just wrote: it loads, and it
+    /// subscribes to nothing — the sample's placeholder servers must never be contacted.
+    func testCreateInitialConfigStartsWithoutSubscriptions() throws {
+        let initialPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("initial-config-\(UUID().uuidString).yml").path
+
+        defer {
+            try? FileManager.default.removeItem(atPath: initialPath)
+        }
+
+        XCTAssertTrue(try ConfigManager.createInitialConfig(at: initialPath))
+        // Writing twice must not clobber what the user configured in the meantime.
+        XCTAssertFalse(try ConfigManager.createInitialConfig(at: initialPath))
+
+        try ConfigManager.shared.loadConfig(from: initialPath)
+        let config = try XCTUnwrap(ConfigManager.shared.config)
+        XCTAssertTrue(config.servers.isEmpty)
+        XCTAssertTrue(config.subscriptions.isEmpty)
+
+        // The commented example stays in the file as the documentation it points at.
+        let content = try String(contentsOfFile: initialPath, encoding: .utf8)
+        XCTAssertTrue(content.contains("# servers:"))
+        XCTAssertTrue(content.contains("ntfy.sh"))
+    }
+
     func testCreateSampleConfigCreatesDirectory() throws {
         let nestedPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("nested-\(UUID().uuidString)")
